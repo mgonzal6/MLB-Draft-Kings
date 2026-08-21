@@ -1,0 +1,11 @@
+[2026-05-28 21:28:44] === Automation Run Triggered by Task Scheduler ===
+[2026-05-28 21:28:44] Starting daily MLB odds extraction job...
+[2026-05-28 21:28:46] CRITICAL ERROR during execution: Could not find any game card layout elements on the page.
+Traceback (most recent call last):
+  File "g:\my drive\dk\code\untitled4.py", line 102, in run_daily_pipeline
+    df = parse_yahoo_mlb_odds()
+         ^^^^^^^^^^^^^^^^^^^^^^
+  File "g:\my drive\dk\code\untitled4.py", line 52, in parse_yahoo_mlb_odds
+    raise ValueError(
+ValueError: Could not find any game card layout elements on the page.
+[2026-05-28 21:28:46] === Run Finished Safely. Exiting Process ===
