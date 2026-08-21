@@ -1,0 +1,554 @@
+r"""
+build_portfolio.py — DK MLB Classic 20-lineup GPP portfolio builder.
+
+Runs entirely locally as the last step of the slate build. Reads the artifacts
+the pipeline already produces and writes a DK-uploadable lineup file plus a
+readable summary:
+
+    inputs  (G:\My Drive\DK\export):
+        Filtered_DKSalaries.csv     slate players, salaries, positions, DK IDs
+        Filtered_Lineups.csv        confirmed batting orders + SPs
+        vegas.csv                   implied team totals (from vegas_sp_adjust.py)
+        pitcher_bs_cache_adj.csv    vegas-adjusted SP table (from vegas_sp_adjust.py)
+        hitter_bs_cache.csv         hitter breakout scores (from base_analysis.py)
+
+    outputs (same folder):
+        DK_upload_<date>.csv            P,P,C,1B,2B,3B,SS,OF,OF,OF  (Name + ID)
+        portfolio_summary_<date>.csv    one row per lineup: tier, stack, SPs, salary
+
+Usage:
+    python build_portfolio.py                # 20 lineups, seed 42
+    python build_portfolio.py --lineups 20 --seed 7
+    python build_portfolio.py --selftest     # audit-logic checks only, no files
+
+Strategy rules encoded (from the baseball-analyzer skill's Fix Registry):
+    #6/#10  hard-fade offenses facing an SP with vegas-adj BS >= 55 or in the
+            bottom implied-total tier: max 1 primary stack, <=25% appearances
+    #8      bring-back: stacks in games with total >= 8.0 reserve one hitter
+            slot for the opposing offense BEFORE fills (slot-aware)
+    #9      stacks use contiguous batting-order windows (wrap allowed)
+    #12     SP exposure: below-median vegas-adj blended -> <=20%; bottom two -> <=15%
+    #13     SP tiers keyed on vegas-adjusted BLENDED (adj_bs is tiebreaker only)
+    #14     stack allocation = 0.6*norm(top-4 hitter BS) + 0.4*norm(implied
+            total), hard cap 3 primary stacks per team
+
+Hard constraints (audited on every lineup before anything is written):
+    salary <= 50000; DK position eligibility respected; <=5 hitters per team;
+    no hitter opposing a rostered SP; players span >=2 games; no duplicate
+    players; no duplicate lineups (and any two differ by >=2 players).
+"""
+import argparse
+import random
+import re
+import sys
+import zlib
+from collections import defaultdict
+
+import pandas as pd
+
+EXPORT_DIR = r"G:\My Drive\DK\export"
+ABBR_REMAP = {"OAK": "ATH", "WAS": "WSH", "CHW": "CWS"}
+SALARY_CAP = 50000
+HITTER_SLOTS = ["C", "1B", "2B", "3B", "SS", "OF1", "OF2", "OF3"]
+ALL_SLOTS = ["SP1", "SP2"] + HITTER_SLOTS
+NICKS = {"michael": "mike", "leonardo": "leo", "matthew": "matt", "christopher": "chris"}
+
+# Exposure knobs (fractions of the portfolio)
+ANCHOR_CAP, SOLID_CAP, FLIER_CAP = 0.40, 0.30, 0.15
+BELOW_MEDIAN_CAP, BOTTOM2_CAP = 0.20, 0.15
+FADE_APPEAR_CAP = 0.25
+HARD_AVOID_BS = 10          # SP adj_bs below this -> zero exposure
+FADE_SP_BS = 55             # opposing offense hard-faded above this
+BRINGBACK_TOTAL = 8.0
+PAIR_CAP = 3                # same SP pair at most 3 times
+MIN_FLOOR = 80              # skill minimum entry threshold
+
+
+def norm(s):
+    s = str(s).lower()
+    for ch in ".,'-":
+        s = s.replace(ch, "")
+    for suf in (" jr", " sr", " ii", " iii", " iv"):
+        if s.endswith(suf):
+            s = s[: -len(suf)]
+    toks = [NICKS.get(t, t) for t in s.split() if len(t) > 1]  # drop middle initials
+    return " ".join(toks)
+
+
+def stable_rng(seed, *parts):
+    """Deterministic RNG independent of PYTHONHASHSEED."""
+    key = ":".join(str(p) for p in parts)
+    return random.Random(seed ^ zlib.crc32(key.encode()))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Data loading / pools
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_data(export_dir):
+    dk = pd.read_csv(f"{export_dir}\\Filtered_DKSalaries.csv")
+    lu = pd.read_csv(f"{export_dir}\\Filtered_Lineups.csv")
+    vegas = pd.read_csv(f"{export_dir}\\vegas.csv").set_index("team")
+    padj = pd.read_csv(f"{export_dir}\\pitcher_bs_cache_adj.csv")
+    hcache = pd.read_csv(f"{export_dir}\\hitter_bs_cache.csv")
+    dk.columns = dk.columns.str.strip()
+    lu.columns = lu.columns.str.strip()
+
+    opp_map, game_map = {}, {}
+    slate_date = None
+    for gi in dk["Game Info"].unique():
+        m = re.match(r"(\w+)@(\w+)\s+(\d{2}/\d{2}/\d{4})", str(gi))
+        if m:
+            a, h, d = m.groups()
+            opp_map[a], opp_map[h] = h, a
+            game_map[a] = game_map[h] = f"{a}@{h}"
+            slate_date = slate_date or d.replace("/", "_")
+
+    dk["nname"] = dk["Name"].map(norm)
+    lu["team"] = lu["team code"].astype(str).str.strip().replace(ABBR_REMAP)
+    lu["bo"] = lu["batting order"].astype(str).str.strip().str.upper()
+    lu["conf"] = lu["confirmed"].astype(str).str.strip().str.upper()
+    lu["nname"] = lu["player name"].map(norm)
+    hcache["nname"] = hcache["PLAYER"].map(norm)
+    padj["nname"] = padj["PLAYER"].map(norm)
+    return dk, lu, vegas, padj, hcache, opp_map, game_map, slate_date
+
+
+def build_sp_pool(dk, lu, padj, opp_map, n_lineups):
+    rows = []
+    for _, r in lu[(lu["bo"] == "SP") & (lu["conf"] == "Y")].iterrows():
+        cand = dk[(dk["nname"] == r["nname"]) & (dk["Roster Position"] == "P")]
+        if cand.empty:
+            print(f"  WARN SP not in DK slate file: {r['player name']}")
+            continue
+        d = cand.iloc[0]
+        a = padj[padj["nname"] == r["nname"]]
+        if a.empty:
+            print(f"  WARN SP has no cache/vegas row (skipping): {r['player name']}")
+            continue
+        a = a.iloc[0]
+        rows.append({"name": d["Name"], "id": d["Name + ID"], "team": d["TeamAbbrev"],
+                     "opp": opp_map[d["TeamAbbrev"]], "salary": int(d["Salary"]),
+                     "adj_bs": a["adj_bs"], "adj_blended": a["adj_blended"],
+                     "blended": a["blended"]})
+    sp_df = pd.DataFrame(rows)
+    if sp_df.empty:
+        sys.exit("ERROR: no confirmed SPs matched — check inputs.")
+
+    # Fix #12/#13 exposure caps
+    med = sp_df["adj_blended"].median()
+    bottom2 = set(sp_df.nsmallest(2, "adj_blended")["name"])
+    caps = {}
+    for _, s in sp_df.iterrows():
+        if s["adj_bs"] < HARD_AVOID_BS:
+            caps[s["name"]] = 0
+        elif s["name"] in bottom2:
+            caps[s["name"]] = round(BOTTOM2_CAP * n_lineups)
+        elif s["adj_blended"] < med:
+            caps[s["name"]] = round(BELOW_MEDIAN_CAP * n_lineups)
+        elif s["adj_bs"] >= 40:
+            caps[s["name"]] = round(ANCHOR_CAP * n_lineups)
+        elif s["adj_bs"] >= 25:
+            caps[s["name"]] = round(SOLID_CAP * n_lineups)
+        else:
+            caps[s["name"]] = round(FLIER_CAP * n_lineups)
+    sp_df["cap"] = sp_df["name"].map(caps)
+    sp_df = sp_df.sort_values("adj_blended", ascending=False).reset_index(drop=True)
+    return sp_df, caps, med
+
+
+def build_hitter_pool(dk, lu, hcache, opp_map):
+    pool = []
+    for _, r in lu[lu["conf"] == "Y"].iterrows():
+        bo = pd.to_numeric(r["batting order"], errors="coerce")
+        if not (1 <= (bo or 0) <= 9):
+            continue
+        cand = dk[(dk["nname"] == r["nname"]) & (dk["Roster Position"] != "P")]
+        if len(cand) > 1:
+            cand = cand[cand["TeamAbbrev"] == r["team"]]
+        if cand.empty:
+            print(f"  WARN hitter not matched in DK: {r['player name']} ({r['team']})")
+            continue
+        d = cand.iloc[0]
+        if d["TeamAbbrev"] != r["team"]:
+            print(f"  WARN team mismatch, dropping: {r['player name']} "
+                  f"LU={r['team']} DK={d['TeamAbbrev']}")
+            continue
+        c = hcache[hcache["nname"] == r["nname"]]
+        bs = float(c.iloc[0]["bs"]) if not c.empty else 5.0
+        avg26 = float(c.iloc[0]["avg26"]) if not c.empty else 4.0
+        slots = set()
+        for p in str(d["Roster Position"]).split("/"):
+            slots.update({"OF1", "OF2", "OF3"} if p == "OF" else {p})
+        pool.append({"name": d["Name"], "id": d["Name + ID"], "team": d["TeamAbbrev"],
+                     "opp": opp_map[d["TeamAbbrev"]], "salary": int(d["Salary"]),
+                     "bo": int(bo), "bs": bs, "avg26": avg26, "slots": slots})
+    return pool
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Allocation (Fix #14) + fades (Fix #6/#10)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def allocate_stacks(hit_pool, sp_df, vegas, n_lineups):
+    hit_df = pd.DataFrame(hit_pool)
+    top4 = hit_df.groupby("team")["bs"].apply(lambda x: x.nlargest(4).sum())
+    impl = pd.Series({t: vegas.loc[t, "implied_total"] if t in vegas.index else 4.0
+                      for t in top4.index})
+    nb = (top4 - top4.min()) / max(top4.max() - top4.min(), 1e-9)
+    ni = (impl - impl.min()) / max(impl.max() - impl.min(), 1e-9)
+    stackscore = 0.6 * nb + 0.4 * ni
+
+    fades = {s["opp"] for _, s in sp_df.iterrows() if s["adj_bs"] >= FADE_SP_BS}
+    fades |= set(impl[impl <= impl.quantile(0.12)].index)
+
+    pool = stackscore.drop(index=[t for t in fades if t in stackscore.index])
+    alloc = (pool / pool.sum() * n_lineups).round().astype(int).clip(upper=3)
+    order = pool.sort_values(ascending=False).index.tolist()
+    while alloc.sum() > n_lineups:
+        for t in reversed(order):
+            if alloc[t] > 0:
+                alloc[t] -= 1
+                break
+    i = 0
+    while alloc.sum() < n_lineups:
+        t = order[i % len(order)]
+        if alloc[t] < 3:
+            alloc[t] += 1
+        i += 1
+    alloc = alloc[alloc > 0].sort_values(ascending=False)
+    return alloc, impl, fades
+
+
+def make_specs(alloc, n_lineups):
+    """Tier assignment: ~20% ceiling (5-stacks), ~20% contrarian (3-stacks),
+    rest core (4-stacks)."""
+    n_ceil = max(1, round(n_lineups * 0.2))
+    n_cont = max(1, round(n_lineups * 0.2))
+    stack_list = [t for t, n in alloc.items() for _ in range(n)]
+    specs, first_seen = [], set()
+    for idx, team in enumerate(stack_list):
+        if idx < n_ceil and team not in first_seen:
+            tier, size = "CEILING", 5
+        elif idx >= len(stack_list) - n_cont:
+            tier, size = "CONTRARIAN", 3
+        else:
+            tier, size = "CORE", 4
+        first_seen.add(team)
+        specs.append({"stack": team, "tier": tier, "size": size})
+    return specs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Construction
+# ─────────────────────────────────────────────────────────────────────────────
+
+def stack_windows(hit_pool, team, size):
+    tp = [h for h in hit_pool if h["team"] == team]
+    by_bo = {h["bo"]: h for h in tp}
+    wins = []
+    for start in range(1, 10):
+        win = [by_bo.get(((start - 1 + k) % 9) + 1) for k in range(size)]
+        win = [w for w in win if w]
+        if len(win) == size:
+            wins.append(win)
+    wins.sort(key=lambda w: -sum(x["bs"] for x in w))
+    fb = sorted(tp, key=lambda x: -x["bs"])[:size]
+    if len(fb) == size:
+        wins.append(fb)
+    return wins
+
+
+def assign_slots(players, open_slots):
+    placed = {}
+    players = sorted(players, key=lambda p: len(p["slots"] & set(open_slots)))
+    for p in players:
+        avail = [s for s in open_slots if s in p["slots"] and s not in placed]
+        if not avail:
+            return None
+        placed[avail[0]] = p
+    return placed
+
+
+class Builder:
+    def __init__(self, sp_df, caps, med, hit_pool, vegas, impl, fades,
+                 opp_map, game_map, n_lineups, seed):
+        self.sp_df, self.caps, self.med = sp_df, caps, med
+        self.hit_pool, self.vegas, self.impl, self.fades = hit_pool, vegas, impl, fades
+        self.opp_map, self.game_map = opp_map, game_map
+        self.n_lineups, self.seed = n_lineups, seed
+        self.sp_use = defaultdict(int)
+        self.pair_use = defaultdict(int)
+        self.fade_appear = defaultdict(int)
+        self.seen_sigs = set()
+        self.lineups = []
+
+    @staticmethod
+    def sig(lu_):
+        return tuple(sorted(p["name"] for p in lu_.values()))
+
+    def pick_sp_pair(self, spec, rng):
+        stack_t = spec["stack"]
+        avoid = {stack_t}
+        if spec.get("bringback"):
+            avoid.add(self.opp_map[stack_t])
+        elig = [s for _, s in self.sp_df.iterrows()
+                if self.sp_use[s["name"]] < self.caps[s["name"]] and s["opp"] not in avoid]
+        if spec["tier"] == "CONTRARIAN":
+            fliers = [s for s in elig if 10 <= s["adj_bs"] < 40]
+            pool = fliers if fliers else elig
+        else:
+            pool = [s for s in elig if s["adj_blended"] >= self.med] or elig
+        rng.shuffle(pool)
+        pool.sort(key=lambda s: -(s["adj_blended"] + rng.uniform(0, 5)))
+        pairs = []
+        for a in pool:
+            for b in pool:
+                if a["name"] == b["name"]:
+                    continue
+                if self.game_map[a["team"]] == self.game_map[b["team"]]:
+                    continue
+                key = tuple(sorted((a["name"], b["name"])))
+                if self.pair_use[key] >= PAIR_CAP:
+                    continue
+                if (b["name"], a["name"]) not in [(y["name"], x["name"]) for x, y in pairs]:
+                    pairs.append((a, b))
+                if len(pairs) >= 6:
+                    return pairs
+        return pairs
+
+    def try_build(self, spec, rng):
+        stack_t = spec["stack"]
+        spec["bringback"] = bool(
+            stack_t in self.vegas.index
+            and self.vegas.loc[stack_t, "game_total"] >= BRINGBACK_TOTAL)
+        pairs = self.pick_sp_pair(spec, rng)
+        if not pairs:
+            return None
+        # sample among the top valid pairs — keeps blended-first ordering but
+        # lets expensive stacks reach cheaper arms and spreads exposure
+        sp1, sp2 = pairs[rng.randrange(0, len(pairs))]
+        banned = {sp1["opp"], sp2["opp"]}
+        if stack_t in banned:
+            return None
+        salary = sp1["salary"] + sp2["salary"]
+
+        wins = stack_windows(self.hit_pool, stack_t, spec["size"])
+        if not wins:
+            return None
+        picked = list(wins[rng.randrange(0, min(len(wins), 4))])
+
+        # Fix #8 — reserve bring-back slot BEFORE fills
+        if spec["bringback"]:
+            opp_t = self.opp_map[stack_t]
+            if opp_t not in banned:
+                for bb in sorted((h for h in self.hit_pool if h["team"] == opp_t),
+                                 key=lambda x: -x["bs"])[:4]:
+                    if assign_slots(picked + [bb], HITTER_SLOTS):
+                        picked.append(bb)
+                        break
+
+        placed = assign_slots(picked, HITTER_SLOTS)
+        if placed is None:
+            return None
+        salary += sum(p["salary"] for p in picked)
+        used = {p["name"] for p in picked} | {sp1["name"], sp2["name"]}
+        tcount = defaultdict(int)
+        for p in picked:
+            tcount[p["team"]] += 1
+
+        fade_cap = round(FADE_APPEAR_CAP * self.n_lineups)
+        open_slots = [s for s in HITTER_SLOTS if s not in placed]
+        rng.shuffle(open_slots)
+        for slot in open_slots:
+            rem = sum(1 for s in HITTER_SLOTS if s not in placed) - 1
+            budget = SALARY_CAP - salary - rem * 2000
+            cands = [h for h in self.hit_pool
+                     if slot in h["slots"] and h["name"] not in used
+                     and h["team"] not in banned and tcount[h["team"]] < 5
+                     and h["salary"] <= budget
+                     and not (h["team"] in self.fades
+                              and self.fade_appear[h["team"]] >= fade_cap)]
+            if not cands:
+                return None
+            cands.sort(key=lambda x: -(x["bs"] / max(x["salary"], 2000) * 1000
+                                       + rng.uniform(0, 2)))
+            pick = cands[min(rng.randrange(0, 3), len(cands) - 1)]
+            placed[slot] = pick
+            salary += pick["salary"]
+            used.add(pick["name"])
+            tcount[pick["team"]] += 1
+
+        if salary > SALARY_CAP:
+            return None
+        lu_ = {"SP1": sp1, "SP2": sp2, **placed}
+        if self.sig(lu_) in self.seen_sigs:
+            return None
+        if len({self.game_map[p["team"]] for p in lu_.values()}) < 2:
+            return None
+        return lu_, salary
+
+    def build_all(self, specs):
+        for spec in specs:
+            built = False
+            for attempt in range(500):
+                rng = stable_rng(self.seed, spec["stack"], spec["tier"], attempt)
+                res = self.try_build(spec, rng)
+                if not res:
+                    continue
+                lu_, salary = res
+                s_new = set(self.sig(lu_))
+                if any(len(s_new - set(s0)) < 2 for s0 in self.seen_sigs):
+                    continue
+                floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
+                         + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
+                                      reverse=True)[:5]) * 2.5)
+                if floor < MIN_FLOOR:
+                    continue
+                self.seen_sigs.add(self.sig(lu_))
+                self.sp_use[lu_["SP1"]["name"]] += 1
+                self.sp_use[lu_["SP2"]["name"]] += 1
+                self.pair_use[tuple(sorted((lu_["SP1"]["name"], lu_["SP2"]["name"])))] += 1
+                for s in HITTER_SLOTS:
+                    if lu_[s]["team"] in self.fades:
+                        self.fade_appear[lu_[s]["team"]] += 1
+                self.lineups.append({"spec": spec, "lineup": lu_,
+                                     "salary": salary, "floor": floor})
+                built = True
+                break
+            if not built:
+                print(f"  !! no unique valid lineup for {spec['stack']} "
+                      f"({spec['tier']}) — skipping, never duplicating")
+        return self.lineups
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audit — the 7 hard checks; nothing is written unless every lineup passes
+# ─────────────────────────────────────────────────────────────────────────────
+
+def audit(lineups, game_map):
+    failures = 0
+    for i, L in enumerate(lineups):
+        lu_ = L["lineup"]
+        errs = []
+        names = [lu_[s]["name"] for s in ALL_SLOTS]
+        if len(set(names)) != 10:
+            errs.append("duplicate player")
+        if L["salary"] > SALARY_CAP:
+            errs.append(f"salary {L['salary']}")
+        for s in HITTER_SLOTS:
+            if s not in lu_[s]["slots"]:
+                errs.append(f"{lu_[s]['name']} ineligible for {s}")
+        tc = defaultdict(int)
+        for s in HITTER_SLOTS:
+            tc[lu_[s]["team"]] += 1
+        if tc and max(tc.values()) > 5:
+            errs.append(">5 hitters from one team")
+        for sp in ("SP1", "SP2"):
+            for s in HITTER_SLOTS:
+                if lu_[s]["team"] == lu_[sp]["opp"]:
+                    errs.append(f"{lu_[s]['name']} opposes {lu_[sp]['name']}")
+        if len({game_map[lu_[s]["team"]] for s in ALL_SLOTS}) < 2:
+            errs.append("single game")
+        if errs:
+            failures += 1
+            print(f"  AUDIT FAIL lineup {i + 1}: {errs}")
+    sigs = [Builder.sig(L["lineup"]) for L in lineups]
+    if len(set(sigs)) != len(sigs):
+        failures += 1
+        print("  AUDIT FAIL: duplicate lineups in portfolio")
+    return failures
+
+
+def selftest():
+    """Audit-logic must catch each violation type."""
+    gm = {"AAA": "AAA@BBB", "BBB": "AAA@BBB", "CCC": "CCC@DDD", "DDD": "CCC@DDD"}
+    def player(name, team, slots, opp):
+        return {"name": name, "team": team, "slots": slots, "opp": opp, "salary": 0}
+    good = {"SP1": player("p1", "AAA", set(), "BBB"),
+            "SP2": player("p2", "CCC", set(), "DDD")}
+    for i, s in enumerate(HITTER_SLOTS):
+        good[s] = player(f"h{i}", "AAA" if i < 5 else "CCC", {s}, "x")
+    assert audit([{"lineup": good, "salary": 49000}], gm) == 0
+    bad = dict(good)
+    bad["C"] = player("h9", "BBB", {"C"}, "AAA")     # opposes SP1
+    assert audit([{"lineup": bad, "salary": 49000}], gm) == 1
+    bad2 = dict(good)
+    bad2["C"] = player("h0", "AAA", {"1B"}, "x")     # dup name + wrong slot
+    assert audit([{"lineup": bad2, "salary": 51000}], gm) == 1
+    print("SELFTEST PASSED")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main():
+    ap = argparse.ArgumentParser(description="Build DK MLB Classic GPP portfolio.")
+    ap.add_argument("--lineups", type=int, default=20)
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--export", default=EXPORT_DIR)
+    ap.add_argument("--selftest", action="store_true")
+    args = ap.parse_args()
+    if args.selftest:
+        selftest()
+        return
+
+    dk, lu, vegas, padj, hcache, opp_map, game_map, slate_date = load_data(args.export)
+    print(f"Slate {slate_date}: {dk['Game Info'].nunique()} games, {len(dk)} DK players")
+
+    sp_df, caps, med = build_sp_pool(dk, lu, padj, opp_map, args.lineups)
+    print(f"\nSP pool ({len(sp_df)}), tiered by vegas-adj blended (median {med:.2f}):")
+    print(sp_df[["name", "team", "opp", "salary", "adj_bs", "adj_blended", "cap"]]
+          .to_string(index=False))
+
+    hit_pool = build_hitter_pool(dk, lu, hcache, opp_map)
+    print(f"\nHitter pool: {len(hit_pool)} confirmed batters")
+
+    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, args.lineups)
+    print(f"\nHard fades (≤25% appearances): {sorted(fades)}")
+    print("Primary-stack allocation:")
+    for t, n in alloc.items():
+        print(f"  {t}: {n}  (implied {impl.get(t, float('nan')):.2f})")
+
+    specs = make_specs(alloc, args.lineups)
+    b = Builder(sp_df, caps, med, hit_pool, vegas, impl, fades,
+                opp_map, game_map, args.lineups, args.seed)
+    lineups = b.build_all(specs)
+
+    print(f"\nBuilt {len(lineups)} lineups; auditing...")
+    if audit(lineups, game_map):
+        sys.exit("AUDIT FAILURES — nothing written.")
+    print("ALL AUDITS PASSED")
+
+    rows, srows = [], []
+    for i, L in enumerate(lineups):
+        lu_ = L["lineup"]
+        rows.append([lu_["SP1"]["id"], lu_["SP2"]["id"]]
+                    + [lu_[s]["id"] for s in HITTER_SLOTS])
+        tc = defaultdict(int)
+        for s in HITTER_SLOTS:
+            tc[lu_[s]["team"]] += 1
+        srows.append({"#": i + 1, "tier": L["spec"]["tier"], "stack": L["spec"]["stack"],
+                      "SP1": lu_["SP1"]["name"], "SP2": lu_["SP2"]["name"],
+                      "teams": " ".join(f"{t}x{n}" for t, n in
+                                        sorted(tc.items(), key=lambda x: -x[1])),
+                      "salary": L["salary"], "floor": round(L["floor"], 1)})
+    up = pd.DataFrame(rows)
+    up.columns = ["P", "P", "C", "1B", "2B", "3B", "SS", "OF", "OF", "OF"]
+    up_path = f"{args.export}\\DK_upload_{slate_date}.csv"
+    up.to_csv(up_path, index=False)
+    summary = pd.DataFrame(srows)
+    sum_path = f"{args.export}\\portfolio_summary_{slate_date}.csv"
+    summary.to_csv(sum_path, index=False)
+
+    print(f"\n{summary.to_string(index=False)}")
+    print("\nSP exposure:")
+    for n, c in sorted(b.sp_use.items(), key=lambda x: -x[1]):
+        print(f"  {n}: {c}/{caps[n]}")
+    print(f"\nwrote {up_path}")
+    print(f"wrote {sum_path}")
+
+
+if __name__ == "__main__":
+    main()

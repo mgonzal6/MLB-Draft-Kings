@@ -21,7 +21,7 @@ echo ===== slate build started %DATE% %TIME% ===== > "%RUNLOG%"
 
 echo.
 echo ============================================================
-echo  Step 1 of 3 - Filter DK salaries + lineups
+echo  Step 1 of 4 - Filter DK salaries + lineups
 echo ============================================================
 python filtered_DK_Salaries.py
 if errorlevel 1 (
@@ -34,7 +34,7 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo  Step 2 of 3 - Pull MLB odds
+echo  Step 2 of 4 - Pull MLB odds
 echo ============================================================
 python mlb_odds.py --csv mlb_odds.csv >> "%RUNLOG%" 2>&1
 if errorlevel 1 (
@@ -46,7 +46,7 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo  Step 3 of 3 - Vegas implied totals + SP adjust
+echo  Step 3 of 4 - Vegas implied totals + SP adjust
 echo ============================================================
 if not exist "G:\My Drive\DK\export\mlb_odds.csv" (
     echo WARNING: mlb_odds.csv missing - skipped vegas_sp_adjust. >> "%LOG%"
@@ -61,7 +61,23 @@ if not exist "G:\My Drive\DK\export\mlb_odds.csv" (
 )
 
 echo.
-echo Slate build done.
+echo ============================================================
+echo  Step 4 of 4 - Build lineup portfolio
+echo ============================================================
+if not exist "G:\My Drive\DK\export\pitcher_bs_cache_adj.csv" (
+    echo *** pitcher_bs_cache_adj.csv missing - skipping portfolio build. ***
+    echo WARNING: portfolio build skipped - no Vegas-adjusted SP table. >> "%LOG%"
+) else (
+    python build_portfolio.py
+    if errorlevel 1 (
+        echo WARNING: build_portfolio.py failed - no upload file written. >> "%LOG%"
+        echo.
+        echo *** build_portfolio.py FAILED - read the message above. ***
+    )
+)
+
+echo.
+echo Slate build done. Upload file: G:\My Drive\DK\export\DK_upload_^<date^>.csv
 echo ===== slate build finished %DATE% %TIME% ===== >> "%LOG%"
 pause
 exit /b 0
