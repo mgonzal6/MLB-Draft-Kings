@@ -7,8 +7,12 @@ rem  not 12 hours old), and writes vegas.csv + the adjusted SP
 rem  table. Output stays on screen; details also go to
 rem  last_slate_build.log.
 rem ============================================================
-cd /d "G:\My Drive\DK\code"
+cd /d "C:\Users\CHAT2\MLB Draft Kings"
 call C:\Users\CHAT2\anaconda3\Scripts\activate.bat
+
+rem Redirected output defaults Python to cp1252, which crashes on the
+rem checkmark/box-drawing characters the scripts print. Force UTF-8.
+set PYTHONUTF8=1
 
 set "LOG=%~dp0run_daily_prep_error.log"
 set "RUNLOG=%~dp0last_slate_build.log"
