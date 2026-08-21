@@ -13,34 +13,14 @@ for i, col in enumerate(cols):
         renamed[col] = f"Pitching {col}"
 df.rename(columns=renamed, inplace=True)
 
-def to_num(col):
-    return pd.to_numeric(df[col], errors='coerce').fillna(0)
+# Actuals are scored with the SAME shared formulas the projections use.
+# (The old inline version here added a QS x4 bonus DK Classic doesn't award,
+# and multiplied raw "6.2" IP by 2.25 instead of converting to 6 2/3 innings —
+# both inflated pitcher actuals relative to the projections.)
+from dk_scoring import dk_pitcher, dk_hitter
 
-batting_dk = (
-    to_num('Batting 1B')  * 3   +
-    to_num('Batting 2B')  * 5   +
-    to_num('Batting 3B')  * 8   +
-    to_num('Batting HR')  * 10  +
-    to_num('Batting RBI') * 2   +
-    to_num('Batting R')   * 2   +
-    to_num('Batting BB')  * 2   +
-    to_num('Batting HBP') * 2   +
-    to_num('Batting SB')  * 5
-)
-
-pitching_dk = (
-    to_num('Pitching IP')        * 2.25 +
-    to_num('Pitching SO.1')      * 2    +
-    to_num('Pitching W')         * 4    +
-    to_num('Pitching ER')        * -2   +
-    to_num('Pitching H.1')       * -0.6 +
-    to_num('Pitching BB.1')      * -0.6 +
-    to_num('Pitching HB')        * -0.6 +
-    to_num('Pitching CG')        * 2.5  +
-    to_num('Pitching CG\nSHO')   * 2.5  +
-    to_num('Pitching NH')        * 5    +
-    to_num('Pitching QS')        * 4
-)
+batting_dk  = df.apply(lambda r: dk_hitter(r,  prefix='Batting '),  axis=1)
+pitching_dk = df.apply(lambda r: dk_pitcher(r, prefix='Pitching '), axis=1)
 
 df['DK_Batting_Score']  = batting_dk.round(2)
 df['DK_Pitching_Score'] = pitching_dk.round(2)

@@ -99,40 +99,11 @@ def split(df: pd.DataFrame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DK SCORING (needed to compute per-game DK points from raw stats)
+# DK SCORING — shared with comparison.py so projections and actuals can never
+# be scored with different formulas.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def ip_to_innings(ip) -> float:
-    """6.2 in BigDataBall means 6 and 2/3 innings."""
-    try:
-        ip = float(ip)
-        full = int(ip)
-        frac = round((ip - full) * 10)
-        return full + frac / 3.0
-    except Exception:
-        return 0.0
-
-
-def dk_pitcher(row) -> float:
-    g = lambda c: float(row.get(c, 0) or 0)
-    ip = ip_to_innings(row.get("IP", 0))
-    s  = ip * 3 * 0.75        # outs × 0.75
-    s += g("SO.1") * 2
-    s += g("W")    * 4
-    s -= g("ER")   * 2
-    s -= g("H.1")  * 0.6
-    s -= g("BB.1") * 0.6
-    s -= g("HB")   * 0.6
-    s += g("CG")   * 2.5
-    s += g("CG\nSHO") * 2.5   # verify: may be "CG SHO" (space) in your parquet
-    s += g("NH")   * 5
-    return s
-
-
-def dk_hitter(row) -> float:
-    g = lambda c: float(row.get(c, 0) or 0)
-    return (g("1B")*3 + g("2B")*5 + g("3B")*8 + g("HR")*10
-            + g("RBI")*2 + g("R")*2 + g("BB")*2 + g("HBP")*2 + g("SB")*5)
+from dk_scoring import dk_pitcher, dk_hitter, ip_to_innings
 
 
 # ─────────────────────────────────────────────────────────────────────────────
