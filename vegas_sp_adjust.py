@@ -272,7 +272,11 @@ def build_sp_adjust(pit_df, lineups_df, vegas_df):
     sps = lu[(lu["bo"] == "SP") & (lu["conf"] == "Y")].copy()
     sps["team"] = sps["team code"].astype(str).str.strip().replace(ABBR_REMAP)
 
-    vmap = vegas_df.set_index("team")[["game_total", "opp_implied"]].to_dict("index")
+    if vegas_df.empty or "team" not in vegas_df.columns:
+        print("  WARNING: empty Vegas table — all SP adjustments default to 0.")
+        vmap = {}
+    else:
+        vmap = vegas_df.set_index("team")[["game_total", "opp_implied"]].to_dict("index")
     pit_df["_n"] = pit_df["PLAYER"].map(normalize_name)
     norm_to_team = {normalize_name(r["player name"]): r["team"] for _, r in sps.iterrows()}
 
@@ -386,6 +390,22 @@ def main():
         slate_date = slate_date_from_dk(dk_df)
         print(f"slate teams ({len(slate_teams)}): {sorted(slate_teams)}")
         print(f"slate date: {slate_date}")
+
+        # Staleness guard — the 8/14-8/20 failure loop: DK files from 6/17 were
+        # still in the load folder, so the date filter matched zero odds rows
+        # and the script crashed every scheduled run. Catch it here with a
+        # message that says exactly what to do.
+        from datetime import date
+        if slate_date is not None and slate_date < date.today():
+            days_old = (date.today() - slate_date).days
+            sys.exit(
+                f"\nSTALE INPUT: the DK salary/lineup files are for {slate_date} "
+                f"({days_old} days ago).\n"
+                f"Download today's Lineups + DKSalaries CSVs into {load} and rerun:\n"
+                f"  1. filtered_DK_Salaries.py  (refreshes Filtered_* in export)\n"
+                f"  2. vegas_sp_adjust.py\n"
+                f"Skipping the Vegas build — vegas.csv was NOT modified."
+            )
     else:
         print("WARNING: Filtered_DKSalaries.csv not found — vegas.csv will include "
               "EVERY game/date in the odds file (no slate or date filter).")
@@ -393,6 +413,14 @@ def main():
 
     print("Building vegas.csv ...")
     vegas_df = build_vegas(odds_df, slate_teams=slate_teams, slate_date=slate_date)
+    if vegas_df.empty:
+        sys.exit(
+            "\nERROR: no Vegas rows were built — the odds file has no games "
+            "matching the slate's teams/date.\n"
+            "Likely causes: stale mlb_odds.csv (rerun mlb_odds.py --csv mlb_odds.csv) "
+            "or stale DK files in the load folder.\n"
+            "vegas.csv was NOT modified."
+        )
     print(vegas_df.to_string(index=False))
     vegas_out = os.path.join(export, "vegas.csv")
     vegas_df.to_csv(vegas_out, index=False)

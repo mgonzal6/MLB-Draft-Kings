@@ -25,6 +25,16 @@ if not lineups_path or not dk_salaries_path:
 else:
     print(f"Found Lineups file: {os.path.basename(lineups_path)}")
     print(f"Found DK Salaries file: {os.path.basename(dk_salaries_path)}")
+
+    # Staleness warning — these are manual downloads from DK; if they haven't
+    # been refreshed, everything downstream (filtering, Vegas adjust) is built
+    # on an old slate.
+    import time
+    for label, path in (("Lineups", lineups_path), ("DKSalaries", dk_salaries_path)):
+        age_days = (time.time() - os.path.getmtime(path)) / 86400
+        if age_days > 1:
+            print(f"*** WARNING: {label} file is {age_days:.0f} days old "
+                  f"({os.path.basename(path)}) — download today's file from DK. ***")
     print("-" * 40)
     
     # 1. Load the datasets
