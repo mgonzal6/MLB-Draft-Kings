@@ -31,6 +31,11 @@ Strategy rules encoded (from the baseball-analyzer skill's Fix Registry):
     #13     SP tiers keyed on vegas-adjusted BLENDED (adj_bs is tiebreaker only)
     #14     stack allocation = 0.6*norm(top-4 hitter BS) + 0.4*norm(implied
             total), hard cap 3 primary stacks per team
+    #15     hitter fill cap: any hitter OUTSIDE the lineup's primary stack
+            appears in <=20% of lineups (8/21: Peters 7/20 fills, 0 FPTS)
+    #16     same-game override: between the two sides of one game, the
+            higher-implied side never gets fewer primary stacks (8/21: COL
+            3 + CEILING over CLE 2 at Coors; CLE implied 6.0 won the slate)
 
 Hard constraints (audited on every lineup before anything is written):
     salary <= 50000; DK position eligibility respected; <=5 hitters per team;
@@ -57,6 +62,7 @@ NICKS = {"michael": "mike", "leonardo": "leo", "matthew": "matt", "christopher":
 ANCHOR_CAP, SOLID_CAP, FLIER_CAP = 0.40, 0.30, 0.15
 BELOW_MEDIAN_CAP, BOTTOM2_CAP = 0.20, 0.15
 FADE_APPEAR_CAP = 0.25
+FILL_CAP = 0.20             # Fix #15 — non-stack hitter appearance cap
 HARD_AVOID_BS = 10          # SP adj_bs below this -> zero exposure
 FADE_SP_BS = 55             # opposing offense hard-faded above this
 BRINGBACK_TOTAL = 8.0
@@ -190,7 +196,7 @@ def build_hitter_pool(dk, lu, hcache, opp_map):
 # Allocation (Fix #14) + fades (Fix #6/#10)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def allocate_stacks(hit_pool, sp_df, vegas, n_lineups):
+def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map):
     hit_df = pd.DataFrame(hit_pool)
     top4 = hit_df.groupby("team")["bs"].apply(lambda x: x.nlargest(4).sum())
     impl = pd.Series({t: vegas.loc[t, "implied_total"] if t in vegas.index else 4.0
@@ -216,6 +222,14 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups):
         if alloc[t] < 3:
             alloc[t] += 1
         i += 1
+    # Fix #16 — same-game override: the two sides of one game share the park,
+    # so their BS inflation cancels and the market's implied gap is the real
+    # signal between them. The higher-implied side never gets fewer stacks.
+    for t in list(alloc.index):
+        o = opp_map.get(t)
+        if (o in alloc.index and impl.get(t, 0) > impl.get(o, 0)
+                and alloc[t] < alloc[o]):
+            alloc[t], alloc[o] = alloc[o], alloc[t]
     alloc = alloc[alloc > 0].sort_values(ascending=False)
     return alloc, impl, fades
 
@@ -280,6 +294,7 @@ class Builder:
         self.sp_use = defaultdict(int)
         self.pair_use = defaultdict(int)
         self.fade_appear = defaultdict(int)
+        self.fill_appear = defaultdict(int)   # Fix #15 — non-stack appearances
         self.seen_sigs = set()
         self.lineups = []
 
@@ -338,11 +353,14 @@ class Builder:
             return None
         picked = list(wins[rng.randrange(0, min(len(wins), 4))])
 
+        fill_cap = round(FILL_CAP * self.n_lineups)
+
         # Fix #8 — reserve bring-back slot BEFORE fills
         if spec["bringback"]:
             opp_t = self.opp_map[stack_t]
             if opp_t not in banned:
-                for bb in sorted((h for h in self.hit_pool if h["team"] == opp_t),
+                for bb in sorted((h for h in self.hit_pool if h["team"] == opp_t
+                                  and self.fill_appear[h["name"]] < fill_cap),
                                  key=lambda x: -x["bs"])[:4]:
                     if assign_slots(picked + [bb], HITTER_SLOTS):
                         picked.append(bb)
@@ -367,6 +385,8 @@ class Builder:
                      if slot in h["slots"] and h["name"] not in used
                      and h["team"] not in banned and tcount[h["team"]] < 5
                      and h["salary"] <= budget
+                     and (h["team"] == stack_t                       # Fix #15
+                          or self.fill_appear[h["name"]] < fill_cap)
                      and not (h["team"] in self.fades
                               and self.fade_appear[h["team"]] >= fade_cap)]
             if not cands:
@@ -412,6 +432,8 @@ class Builder:
                 for s in HITTER_SLOTS:
                     if lu_[s]["team"] in self.fades:
                         self.fade_appear[lu_[s]["team"]] += 1
+                    if lu_[s]["team"] != spec["stack"]:              # Fix #15
+                        self.fill_appear[lu_[s]["name"]] += 1
                 self.lineups.append({"spec": spec, "lineup": lu_,
                                      "salary": salary, "floor": floor})
                 built = True
@@ -505,7 +527,7 @@ def main():
     hit_pool = build_hitter_pool(dk, lu, hcache, opp_map)
     print(f"\nHitter pool: {len(hit_pool)} confirmed batters")
 
-    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, args.lineups)
+    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, args.lineups, opp_map)
     print(f"\nHard fades (≤25% appearances): {sorted(fades)}")
     print("Primary-stack allocation:")
     for t, n in alloc.items():
