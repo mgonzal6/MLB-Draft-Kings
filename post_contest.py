@@ -34,6 +34,25 @@ POST_DIR = r"G:\My Drive\DK\Post Contest"
 EXPORT_DIR = r"G:\My Drive\DK\export"
 POS_TOKENS = {"P", "C", "1B", "2B", "3B", "SS", "OF"}
 
+# Payout curve for the usual $0.10 / 3,567-entry GPP (edit for other contests).
+ENTRY_FEE = 0.10
+PAYOUTS = [(1, 1, 30.00), (2, 2, 15.00), (3, 3, 10.00), (4, 4, 5.00),
+           (5, 5, 4.00), (6, 7, 3.00), (8, 10, 2.00), (11, 15, 1.50),
+           (16, 20, 1.00), (21, 30, 0.75), (31, 60, 0.50), (61, 130, 0.40),
+           (131, 340, 0.30), (341, 830, 0.20)]
+
+
+def pos_payout(p):
+    for lo, hi, amt in PAYOUTS:
+        if lo <= p <= hi:
+            return amt
+    return 0.0
+
+
+def entry_payout(rank, tie_size):
+    """DK splits the payouts of the occupied positions across tied entries."""
+    return sum(pos_payout(p) for p in range(rank, rank + tie_size)) / tie_size
+
 
 # ---------------------------------------------------------------- parsing
 
@@ -146,21 +165,30 @@ def main():
     lineup_keys = mine["players"].map(lambda lu: tuple(sorted(n for _, n in lu)))
     dup_groups = lineup_keys.map(Counter(lineup_keys))
     mine["pctile"] = mine["Rank"] / n_field * 100
-    rows = []
+    tie_sizes = standings.groupby("Rank")["EntryId"].count()
+    rows, total_won = [], 0.0
     for (_, r), dups in zip(mine.iterrows(), dup_groups):
         names = [n for _, n in r["players"]]
         sal = int(salaries["Salary"].reindex(names).sum()) if salaries is not None else None
+        won = entry_payout(int(r["Rank"]), int(tie_sizes[r["Rank"]]))
+        total_won += won
         flag = f"  DUPE x{dups}" if dups > 1 else ""
         sal_s = f"  ${sal}" if sal and sal > 0 else ""
+        won_s = f"  won ${won:.2f}" if won else ""
         print(f"  rank {int(r['Rank']):>5} (top {r['pctile']:4.1f}%)  "
-              f"{r['Points']:6.2f} pts{sal_s}{flag}")
+              f"{r['Points']:6.2f} pts{sal_s}{won_s}{flag}")
         rows.append({"Rank": int(r["Rank"]), "Pctile": round(r["pctile"], 1),
-                     "Points": r["Points"], "Salary": sal, "DupCount": dups,
-                     "Lineup": r["Lineup"]})
+                     "Points": r["Points"], "Salary": sal, "Won": round(won, 2),
+                     "DupCount": dups, "Lineup": r["Lineup"]})
     n_dupes = int((dup_groups > 1).sum())
     if n_dupes:
         print(f"\n  WARNING: {n_dupes} entries are duplicates of another of my own "
               f"lineups -- wasted entry diversity.")
+
+    cost = len(mine) * ENTRY_FEE
+    net = total_won - cost
+    print(f"\n  ROI: won ${total_won:.2f} on ${cost:.2f} in entries -> "
+          f"net ${net:+.2f} ({net / cost * 100:+.0f}%)")
 
     # ---- my exposure vs field
     my_counts = exposure_counts(mine["players"])

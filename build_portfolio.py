@@ -17,9 +17,17 @@ readable summary:
         portfolio_summary_<date>.csv    one row per lineup: tier, stack, SPs, salary
 
 Usage:
-    python build_portfolio.py                # 20 lineups, seed 42
-    python build_portfolio.py --lineups 20 --seed 7
+    python build_portfolio.py                # 5 cash + 15 GPP lineups, seed 42
+    python build_portfolio.py --lineups 20 --cash 5 --seed 7
+    python build_portfolio.py --cash 0       # pure GPP portfolio (old behavior)
     python build_portfolio.py --selftest     # audit-logic checks only, no files
+
+Cash mode (--cash N, default 5): the first N lineups are floor-maximized for
+single-entry double-ups — SP pairs from the top vegas-adj blended arms, hitters
+by avg26 (floor) from top-half implied-total teams, mini-stacks <=3, no punts
+below $3K, no darts. All lineups (cash + GPP) share uniqueness and exposure
+caps because the whole file also enters the mass-entry GPP; the cash subset is
+additionally written to DK_upload_cash_<date>.csv for the single-entry contests.
 
 Strategy rules encoded (from the baseball-analyzer skill's Fix Registry):
     #6/#10  hard-fade offenses facing an SP with vegas-adj BS >= 55 or in the
@@ -64,6 +72,12 @@ BELOW_MEDIAN_CAP, BOTTOM2_CAP = 0.20, 0.15
 FADE_APPEAR_CAP = 0.25
 FILL_CAP = 0.20             # Fix #15 — non-stack hitter appearance cap
 HARD_AVOID_BS = 10          # SP adj_bs below this -> zero exposure
+
+# Cash-lineup knobs (single-entry double-ups: floor over ceiling)
+CASH_HITTER_CAP = 3         # same hitter in at most 3 of the cash lineups
+CASH_TEAM_CAP = 3           # mini-stacks only — no 4/5-stacks in cash
+CASH_MIN_SALARY = 3000      # no punt plays in cash
+CASH_MIN_SPEND = 48000      # cash lineups must use the cap
 FADE_SP_BS = 55             # opposing offense hard-faded above this
 BRINGBACK_TOTAL = 8.0
 PAIR_CAP = 3                # same SP pair at most 3 times
@@ -295,6 +309,7 @@ class Builder:
         self.pair_use = defaultdict(int)
         self.fade_appear = defaultdict(int)
         self.fill_appear = defaultdict(int)   # Fix #15 — non-stack appearances
+        self.cash_use = defaultdict(int)      # hitter appearances across cash set
         self.seen_sigs = set()
         self.lineups = []
 
@@ -331,6 +346,97 @@ class Builder:
                 if len(pairs) >= 6:
                     return pairs
         return pairs
+
+    def cash_sp_pair(self, rng):
+        """Best available pair by summed vegas-adj blended — floor arms only."""
+        elig = [s for _, s in self.sp_df.iterrows()
+                if self.caps[s["name"]] > 0
+                and self.sp_use[s["name"]] < self.caps[s["name"]]
+                and s["adj_blended"] >= self.med]
+        pairs = []
+        for a in elig:
+            for b in elig:
+                if (a["name"] >= b["name"]
+                        or self.game_map[a["team"]] == self.game_map[b["team"]]):
+                    continue
+                key = tuple(sorted((a["name"], b["name"])))
+                if self.pair_use[key] < PAIR_CAP:
+                    pairs.append((a, b))
+        pairs.sort(key=lambda p: -(p[0]["adj_blended"] + p[1]["adj_blended"]))
+        return pairs[: max(1, min(3, len(pairs)))]
+
+    def try_build_cash(self, rng):
+        pairs = self.cash_sp_pair(rng)
+        if not pairs:
+            return None
+        sp1, sp2 = pairs[rng.randrange(0, len(pairs))]
+        banned = {sp1["opp"], sp2["opp"]}
+        salary = sp1["salary"] + sp2["salary"]
+
+        med_impl = self.impl.median()
+        placed, used = {}, {sp1["name"], sp2["name"]}
+        tcount = defaultdict(int)
+        open_slots = list(HITTER_SLOTS)
+        rng.shuffle(open_slots)
+        for slot in open_slots:
+            rem = sum(1 for s in HITTER_SLOTS if s not in placed) - 1
+            budget = SALARY_CAP - salary - rem * CASH_MIN_SALARY
+            cands = [h for h in self.hit_pool
+                     if slot in h["slots"] and h["name"] not in used
+                     and h["team"] not in banned and h["team"] not in self.fades
+                     and tcount[h["team"]] < CASH_TEAM_CAP
+                     and CASH_MIN_SALARY <= h["salary"] <= budget
+                     and self.impl.get(h["team"], 0) >= med_impl
+                     and self.cash_use[h["name"]] < CASH_HITTER_CAP]
+            if not cands:
+                return None
+            cands.sort(key=lambda x: -(x["avg26"] + rng.uniform(0, 0.5)))
+            placed[slot] = pick = cands[min(rng.randrange(0, 2), len(cands) - 1)]
+            salary += pick["salary"]
+            used.add(pick["name"])
+            tcount[pick["team"]] += 1
+
+        if not (CASH_MIN_SPEND <= salary <= SALARY_CAP):
+            return None
+        lu_ = {"SP1": sp1, "SP2": sp2, **placed}
+        if self.sig(lu_) in self.seen_sigs:
+            return None
+        if len({self.game_map[p["team"]] for p in lu_.values()}) < 2:
+            return None
+        return lu_, salary
+
+    def build_cash(self, n_cash):
+        spec = {"stack": "CASH", "tier": "CASH", "size": 0, "bringback": False}
+        for i in range(n_cash):
+            built = False
+            for attempt in range(500):
+                rng = stable_rng(self.seed, "CASH", i, attempt)
+                res = self.try_build_cash(rng)
+                if not res:
+                    continue
+                lu_, salary = res
+                s_new = set(self.sig(lu_))
+                if any(len(s_new - set(s0)) < 2 for s0 in self.seen_sigs):
+                    continue
+                floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
+                         + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
+                                      reverse=True)[:5]) * 2.5)
+                if floor < MIN_FLOOR:
+                    continue
+                self.seen_sigs.add(self.sig(lu_))
+                self.sp_use[lu_["SP1"]["name"]] += 1
+                self.sp_use[lu_["SP2"]["name"]] += 1
+                self.pair_use[tuple(sorted((lu_["SP1"]["name"],
+                                            lu_["SP2"]["name"])))] += 1
+                for s in HITTER_SLOTS:
+                    self.cash_use[lu_[s]["name"]] += 1
+                self.lineups.append({"spec": dict(spec), "lineup": lu_,
+                                     "salary": salary, "floor": floor})
+                built = True
+                break
+            if not built:
+                print(f"  !! could not build unique cash lineup {i + 1} — skipping")
+        return self.lineups
 
     def try_build(self, spec, rng):
         stack_t = spec["stack"]
@@ -507,7 +613,10 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser(description="Build DK MLB Classic GPP portfolio.")
-    ap.add_argument("--lineups", type=int, default=20)
+    ap.add_argument("--lineups", type=int, default=20,
+                    help="total lineups, cash included")
+    ap.add_argument("--cash", type=int, default=5,
+                    help="floor-maximized single-entry lineups (0 = pure GPP)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--export", default=EXPORT_DIR)
     ap.add_argument("--selftest", action="store_true")
@@ -527,15 +636,21 @@ def main():
     hit_pool = build_hitter_pool(dk, lu, hcache, opp_map)
     print(f"\nHitter pool: {len(hit_pool)} confirmed batters")
 
-    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, args.lineups, opp_map)
+    n_gpp = args.lineups - args.cash
+    if n_gpp < 0:
+        sys.exit("ERROR: --cash cannot exceed --lineups")
+    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, n_gpp, opp_map)
     print(f"\nHard fades (≤25% appearances): {sorted(fades)}")
-    print("Primary-stack allocation:")
+    print(f"Primary-stack allocation ({n_gpp} GPP lineups):")
     for t, n in alloc.items():
         print(f"  {t}: {n}  (implied {impl.get(t, float('nan')):.2f})")
 
-    specs = make_specs(alloc, args.lineups)
+    specs = make_specs(alloc, n_gpp)
     b = Builder(sp_df, caps, med, hit_pool, vegas, impl, fades,
                 opp_map, game_map, args.lineups, args.seed)
+    if args.cash:
+        print(f"\nBuilding {args.cash} cash lineups (floor-first)...")
+        b.build_cash(args.cash)
     lineups = b.build_all(specs)
 
     print(f"\nBuilt {len(lineups)} lineups; auditing...")
@@ -556,13 +671,21 @@ def main():
                       "teams": " ".join(f"{t}x{n}" for t, n in
                                         sorted(tc.items(), key=lambda x: -x[1])),
                       "salary": L["salary"], "floor": round(L["floor"], 1)})
+    cols = ["P", "P", "C", "1B", "2B", "3B", "SS", "OF", "OF", "OF"]
     up = pd.DataFrame(rows)
-    up.columns = ["P", "P", "C", "1B", "2B", "3B", "SS", "OF", "OF", "OF"]
+    up.columns = cols
     up_path = f"{args.export}\\DK_upload_{slate_date}.csv"
     up.to_csv(up_path, index=False)
     summary = pd.DataFrame(srows)
     sum_path = f"{args.export}\\portfolio_summary_{slate_date}.csv"
     summary.to_csv(sum_path, index=False)
+
+    cash_idx = [i for i, L in enumerate(lineups) if L["spec"]["tier"] == "CASH"]
+    if cash_idx:
+        cash_up = pd.DataFrame([rows[i] for i in cash_idx])
+        cash_up.columns = cols
+        cash_path = f"{args.export}\\DK_upload_cash_{slate_date}.csv"
+        cash_up.to_csv(cash_path, index=False)
 
     print(f"\n{summary.to_string(index=False)}")
     print("\nSP exposure:")
@@ -570,6 +693,8 @@ def main():
         print(f"  {n}: {c}/{caps[n]}")
     print(f"\nwrote {up_path}")
     print(f"wrote {sum_path}")
+    if cash_idx:
+        print(f"wrote {cash_path}  ({len(cash_idx)} single-entry cash lineups)")
 
 
 if __name__ == "__main__":
