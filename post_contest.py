@@ -34,8 +34,11 @@ POST_DIR = r"G:\My Drive\DK\Post Contest"
 EXPORT_DIR = r"G:\My Drive\DK\export"
 POS_TOKENS = {"P", "C", "1B", "2B", "3B", "SS", "OF"}
 
-# Payout curve for the usual $0.10 / 3,567-entry GPP (edit for other contests).
+# Payout curve for the $0.10 / 3,567-entry GPP. ROI is reported ONLY when the
+# contest's field matches PAYOUT_FIELD — a different contest has a different
+# curve, and printing dollars from the wrong table is worse than printing none.
 ENTRY_FEE = 0.10
+PAYOUT_FIELD = 3567
 PAYOUTS = [(1, 1, 30.00), (2, 2, 15.00), (3, 3, 10.00), (4, 4, 5.00),
            (5, 5, 4.00), (6, 7, 3.00), (8, 10, 2.00), (11, 15, 1.50),
            (16, 20, 1.00), (21, 30, 0.75), (31, 60, 0.50), (61, 130, 0.40),
@@ -57,9 +60,11 @@ def entry_payout(rank, tie_size):
 # ---------------------------------------------------------------- parsing
 
 def newest_standings_csv():
-    files = glob.glob(os.path.join(POST_DIR, "contest-standings-*.csv"))
+    files = [f for ext in ("csv", "xlsx")
+             for f in glob.glob(os.path.join(POST_DIR,
+                                             f"contest-standings-*.{ext}"))]
     if not files:
-        sys.exit(f"no contest-standings-*.csv found in {POST_DIR}")
+        sys.exit(f"no contest-standings-* file found in {POST_DIR}")
     return max(files, key=os.path.getmtime)
 
 
@@ -79,15 +84,30 @@ def parse_lineup(lineup_str):
     return players
 
 
+def read_export(path):
+    """DK sometimes serves the 'CSV' as a real .xlsx. Sniff the magic bytes
+    rather than trusting the extension, and strip any UTF-8 BOM off the
+    header names."""
+    with open(path, "rb") as fh:
+        magic = fh.read(2)
+    df = pd.read_excel(path) if magic == b"PK" else pd.read_csv(path)
+    df.columns = [str(c).replace("﻿", "").replace("ï»¿", "").strip()
+                  for c in df.columns]
+    return df
+
+
 def load_standings(path):
-    df = pd.read_csv(path)
+    df = read_export(path)
     standings = df[["Rank", "EntryId", "EntryName", "Points", "Lineup"]].dropna(
         subset=["EntryName"]).copy()
     standings["Rank"] = standings["Rank"].astype(int)
 
     own = df[["Player", "Roster Position", "%Drafted", "FPTS"]].dropna(
         subset=["Player"]).copy()
-    own["%Drafted"] = own["%Drafted"].astype(str).str.rstrip("%").astype(float)
+    # CSV exports give "36.81%"; the xlsx variant gives the fraction 0.3681.
+    pct = pd.to_numeric(own["%Drafted"].astype(str).str.rstrip("%"),
+                        errors="coerce")
+    own["%Drafted"] = pct * 100 if pct.max() <= 1.0 else pct
     own["FPTS"] = pd.to_numeric(own["FPTS"], errors="coerce").fillna(0.0)
     # DK lists a player once per roster position; same-name players (two Max
     # Muncys) also collide -- keep the higher-owned row so lookups are scalar.
@@ -166,11 +186,12 @@ def main():
     dup_groups = lineup_keys.map(Counter(lineup_keys))
     mine["pctile"] = mine["Rank"] / n_field * 100
     tie_sizes = standings.groupby("Rank")["EntryId"].count()
+    roi_ok = n_field == PAYOUT_FIELD
     rows, total_won = [], 0.0
     for (_, r), dups in zip(mine.iterrows(), dup_groups):
         names = [n for _, n in r["players"]]
         sal = int(salaries["Salary"].reindex(names).sum()) if salaries is not None else None
-        won = entry_payout(int(r["Rank"]), int(tie_sizes[r["Rank"]]))
+        won = entry_payout(int(r["Rank"]), int(tie_sizes[r["Rank"]])) if roi_ok else 0.0
         total_won += won
         flag = f"  DUPE x{dups}" if dups > 1 else ""
         sal_s = f"  ${sal}" if sal and sal > 0 else ""
@@ -185,10 +206,14 @@ def main():
         print(f"\n  WARNING: {n_dupes} entries are duplicates of another of my own "
               f"lineups -- wasted entry diversity.")
 
-    cost = len(mine) * ENTRY_FEE
-    net = total_won - cost
-    print(f"\n  ROI: won ${total_won:.2f} on ${cost:.2f} in entries -> "
-          f"net ${net:+.2f} ({net / cost * 100:+.0f}%)")
+    if roi_ok:
+        cost = len(mine) * ENTRY_FEE
+        net = total_won - cost
+        print(f"\n  ROI: won ${total_won:.2f} on ${cost:.2f} in entries -> "
+              f"net ${net:+.2f} ({net / cost * 100:+.0f}%)")
+    else:
+        print(f"\n  (ROI skipped: payout table is for a {PAYOUT_FIELD}-entry "
+              f"contest, this one has {n_field} — edit PAYOUTS to enable)")
 
     # ---- my exposure vs field
     my_counts = exposure_counts(mine["players"])

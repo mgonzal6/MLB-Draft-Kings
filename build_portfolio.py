@@ -44,6 +44,12 @@ Strategy rules encoded (from the baseball-analyzer skill's Fix Registry):
     #16     same-game override: between the two sides of one game, the
             higher-implied side never gets fewer primary stacks (8/21: COL
             3 + CEILING over CLE 2 at Coors; CLE implied 6.0 won the slate)
+    #17     no SP ever exceeds ABSOLUTE_SP_CAP, cap-scaling included; a thin
+            arm pool builds FEWER lineups instead (8/22: scaling put Weathers
+            at 55% and he scored 4.7)
+    #18     slates of <=SMALL_SLATE_GAMES games build all-cash — the GPP tier
+            ladder needs a wide pool to be worth its variance (8/22, 3 games:
+            cash lineups averaged 89.4 and took both cashes, GPP tiers 69.7)
 
 Hard constraints (audited on every lineup before anything is written):
     salary <= 50000; DK position eligibility respected; <=5 hitters per team;
@@ -69,12 +75,16 @@ NICKS = {"michael": "mike", "leonardo": "leo", "matthew": "matt", "christopher":
 # Exposure knobs (fractions of the portfolio)
 ANCHOR_CAP, SOLID_CAP, FLIER_CAP = 0.40, 0.30, 0.15
 BELOW_MEDIAN_CAP, BOTTOM2_CAP = 0.20, 0.15
+ABSOLUTE_SP_CAP = 0.40      # Fix #17 — no arm ever exceeds this, scaling included
 FADE_APPEAR_CAP = 0.25
 FILL_CAP = 0.20             # Fix #15 — non-stack hitter appearance cap
 HARD_AVOID_BS = 10          # SP adj_bs below this -> zero exposure
+SMALL_SLATE_GAMES = 4       # Fix #18 — at or below this, build all-cash
 
 # Cash-lineup knobs (single-entry double-ups: floor over ceiling)
-CASH_HITTER_CAP = 3         # same hitter in at most 3 of the cash lineups
+CASH_HITTER_CAP_PCT = 0.60  # same hitter in at most 60% of the cash lineups
+PAIR_FLOOR_PCT = 0.75       # Fix #19 — a pair's summed adj_blended must reach
+                            # this share of the slate's best pair
 CASH_TEAM_CAP = 3           # mini-stacks only — no 4/5-stacks in cash
 CASH_MIN_SALARY = 3000      # no punt plays in cash
 CASH_MIN_SPEND = 48000      # cash lineups must use the cap
@@ -172,9 +182,32 @@ def build_sp_pool(dk, lu, padj, opp_map, n_lineups):
             caps[s["name"]] = round(SOLID_CAP * n_lineups)
         else:
             caps[s["name"]] = round(FLIER_CAP * n_lineups)
+    # Fix #17 — the caps must supply 2 SP slots per lineup, but no arm may
+    # ever exceed ABSOLUTE_SP_CAP. 8/22: proportional scaling pushed Weathers
+    # to 55% and he scored 4.7. Give the deficit to the LOWER-tier arms (the
+    # anchors are already at their designed max) and, if even that can't
+    # cover it, build fewer lineups rather than over-concentrate one arm.
+    ceiling = max(1, round(ABSOLUTE_SP_CAP * n_lineups))
+    for k in caps:
+        caps[k] = min(caps[k], ceiling)
+    need = 2 * n_lineups
+    order = sp_df.sort_values("adj_blended", ascending=False)["name"].tolist()
+    while sum(caps.values()) < need:
+        room = [k for k in order if 0 < caps[k] < ceiling]
+        if not room:
+            break
+        for k in room:
+            caps[k] += 1
+            if sum(caps.values()) >= need:
+                break
+    feasible = sum(caps.values()) // 2
+    if feasible < n_lineups:
+        print(f"  !! arm pool supports only {feasible} lineups at the "
+              f"{ABSOLUTE_SP_CAP:.0%} per-SP ceiling (asked for {n_lineups}) — "
+              f"building fewer rather than over-concentrating")
     sp_df["cap"] = sp_df["name"].map(caps)
     sp_df = sp_df.sort_values("adj_blended", ascending=False).reset_index(drop=True)
-    return sp_df, caps, med
+    return sp_df, caps, med, min(feasible, n_lineups)
 
 
 def build_hitter_pool(dk, lu, hcache, opp_map):
@@ -223,6 +256,8 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map):
     fades |= set(impl[impl <= impl.quantile(0.12)].index)
 
     pool = stackscore.drop(index=[t for t in fades if t in stackscore.index])
+    if pool.empty:
+        sys.exit("ERROR: every team is hard-faded — no stacks possible.")
     alloc = (pool / pool.sum() * n_lineups).round().astype(int).clip(upper=3)
     order = pool.sort_values(ascending=False).index.tolist()
     while alloc.sum() > n_lineups:
@@ -230,12 +265,23 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map):
             if alloc[t] > 0:
                 alloc[t] -= 1
                 break
-    i = 0
+    # Top-up order: non-faded teams to cap 3, then faded teams to their Fix #6
+    # maximum of 1; on tiny slates where even that can't fill the count, raise
+    # the non-faded cap (never the faded one) until it fits.
+    fade_order = [t for t in stackscore.sort_values(ascending=False).index
+                  if t in fades]
+    caps_t = {t: 3 for t in order}
+    caps_t.update({t: 1 for t in fade_order})
+    alloc = alloc.reindex(order + fade_order, fill_value=0)
     while alloc.sum() < n_lineups:
-        t = order[i % len(order)]
-        if alloc[t] < 3:
-            alloc[t] += 1
-        i += 1
+        for t in order + fade_order:
+            if alloc[t] < caps_t[t]:
+                alloc[t] += 1
+                break
+        else:
+            for t in order:
+                caps_t[t] += 1
+            print(f"  small slate: non-faded stack cap raised to {caps_t[order[0]]}")
     # Fix #16 — same-game override: the two sides of one game share the park,
     # so their BS inflation cancels and the market's implied gap is the real
     # signal between them. The higher-implied side never gets fewer stacks.
@@ -300,16 +346,21 @@ def assign_slots(players, open_slots):
 
 class Builder:
     def __init__(self, sp_df, caps, med, hit_pool, vegas, impl, fades,
-                 opp_map, game_map, n_lineups, seed):
+                 opp_map, game_map, n_lineups, seed, fade_reserved=None):
         self.sp_df, self.caps, self.med = sp_df, caps, med
         self.hit_pool, self.vegas, self.impl, self.fades = hit_pool, vegas, impl, fades
         self.opp_map, self.game_map = opp_map, game_map
         self.n_lineups, self.seed = n_lineups, seed
+        # Appearances a faded team's own primary stacks will consume — fills
+        # must leave room for them or the 25% cap breaks (Fix #6/#10).
+        self.fade_reserved = fade_reserved or {}
         self.sp_use = defaultdict(int)
         self.pair_use = defaultdict(int)
         self.fade_appear = defaultdict(int)
         self.fill_appear = defaultdict(int)   # Fix #15 — non-stack appearances
         self.cash_use = defaultdict(int)      # hitter appearances across cash set
+        self.n_cash, self.n_pairs = 0, 1      # set properly by build_cash
+        self.cash_hitter_cap = 3
         self.seen_sigs = set()
         self.lineups = []
 
@@ -325,45 +376,68 @@ class Builder:
         elig = [s for _, s in self.sp_df.iterrows()
                 if self.sp_use[s["name"]] < self.caps[s["name"]] and s["opp"] not in avoid]
         if spec["tier"] == "CONTRARIAN":
-            fliers = [s for s in elig if 10 <= s["adj_bs"] < 40]
-            pool = fliers if fliers else elig
+            pref = [s for s in elig if 10 <= s["adj_bs"] < 40]
         else:
-            pool = [s for s in elig if s["adj_blended"] >= self.med] or elig
-        rng.shuffle(pool)
-        pool.sort(key=lambda s: -(s["adj_blended"] + rng.uniform(0, 5)))
-        pairs = []
-        for a in pool:
-            for b in pool:
-                if a["name"] == b["name"]:
-                    continue
-                if self.game_map[a["team"]] == self.game_map[b["team"]]:
-                    continue
-                key = tuple(sorted((a["name"], b["name"])))
-                if self.pair_use[key] >= PAIR_CAP:
-                    continue
-                if (b["name"], a["name"]) not in [(y["name"], x["name"]) for x, y in pairs]:
-                    pairs.append((a, b))
-                if len(pairs) >= 6:
-                    return pairs
-        return pairs
+            pref = [s for s in elig if s["adj_blended"] >= self.med]
+        # Try the preferred tier first; if it can't produce a single valid
+        # pair (small slates: same-game clashes, pair caps), fall back to the
+        # full eligible pool rather than failing the lineup outright.
+        for pool in (pref, elig):
+            if not pool:
+                continue
+            rng.shuffle(pool)
+            pool.sort(key=lambda s: -(s["adj_blended"] + rng.uniform(0, 5)))
+            pairs = []
+            for a in pool:
+                for b in pool:
+                    if a["name"] == b["name"]:
+                        continue
+                    if self.game_map[a["team"]] == self.game_map[b["team"]]:
+                        continue
+                    key = tuple(sorted((a["name"], b["name"])))
+                    if self.pair_use[key] >= PAIR_CAP:
+                        continue
+                    if (b["name"], a["name"]) not in [(y["name"], x["name"])
+                                                      for x, y in pairs]:
+                        pairs.append((a, b))
+                    if len(pairs) >= 6:
+                        return pairs
+            if pairs:
+                return pairs
+        return []
 
     def cash_sp_pair(self, rng):
-        """Best available pair by summed vegas-adj blended — floor arms only."""
-        elig = [s for _, s in self.sp_df.iterrows()
-                if self.caps[s["name"]] > 0
-                and self.sp_use[s["name"]] < self.caps[s["name"]]
-                and s["adj_blended"] >= self.med]
-        pairs = []
-        for a in elig:
-            for b in elig:
-                if (a["name"] >= b["name"]
-                        or self.game_map[a["team"]] == self.game_map[b["team"]]):
-                    continue
-                key = tuple(sorted((a["name"], b["name"])))
-                if self.pair_use[key] < PAIR_CAP:
-                    pairs.append((a, b))
-        pairs.sort(key=lambda p: -(p[0]["adj_blended"] + p[1]["adj_blended"]))
-        return pairs[: max(1, min(3, len(pairs)))]
+        """Best available pair by summed vegas-adj blended — floor arms first.
+
+        On a thin slate the above-median pool can be too small to form any
+        legal pair (8/22: 3 above-median arms, two of them in the same game),
+        so fall back to the full pool. The per-pair cap also scales with the
+        cash set: 20 cash lineups cannot be spread over 3 pairs at PAIR_CAP=3.
+        """
+        avail = [s for _, s in self.sp_df.iterrows()
+                 if self.caps[s["name"]] > 0
+                 and self.sp_use[s["name"]] < self.caps[s["name"]]]
+        pair_cap = max(PAIR_CAP, -(-self.n_cash // max(1, self.n_pairs)))
+        for elig in ([s for s in avail if s["adj_blended"] >= self.med], avail):
+            pairs = []
+            for a in elig:
+                for b in elig:
+                    if (a["name"] >= b["name"]
+                            or self.game_map[a["team"]] == self.game_map[b["team"]]):
+                        continue
+                    key = tuple(sorted((a["name"], b["name"])))
+                    if self.pair_use[key] < pair_cap:
+                        pairs.append((a, b))
+            # Fix #19 — a cash lineup lives on its arms; refuse pairs whose
+            # combined projection is far off the slate's best. 8/22: the two
+            # lineups on the weakest legal pair scored 33.5 and 36.5.
+            pairs = [p for p in pairs
+                     if p[0]["adj_blended"] + p[1]["adj_blended"]
+                     >= PAIR_FLOOR_PCT * self.best_pair_blended]
+            if pairs:
+                pairs.sort(key=lambda p: -(p[0]["adj_blended"] + p[1]["adj_blended"]))
+                return pairs[: max(1, min(3, len(pairs)))]
+        return []
 
     def try_build_cash(self, rng):
         pairs = self.cash_sp_pair(rng)
@@ -374,6 +448,11 @@ class Builder:
         salary = sp1["salary"] + sp2["salary"]
 
         med_impl = self.impl.median()
+        ok_teams = {t for t in self.impl.index
+                    if t not in banned and t not in self.fades}
+        top_teams = {t for t in ok_teams if self.impl.get(t, 0) >= med_impl}
+        if len(top_teams) * CASH_TEAM_CAP < len(HITTER_SLOTS):
+            top_teams = ok_teams    # small slate: implied filter too strict
         placed, used = {}, {sp1["name"], sp2["name"]}
         tcount = defaultdict(int)
         open_slots = list(HITTER_SLOTS)
@@ -383,11 +462,10 @@ class Builder:
             budget = SALARY_CAP - salary - rem * CASH_MIN_SALARY
             cands = [h for h in self.hit_pool
                      if slot in h["slots"] and h["name"] not in used
-                     and h["team"] not in banned and h["team"] not in self.fades
+                     and h["team"] in top_teams
                      and tcount[h["team"]] < CASH_TEAM_CAP
                      and CASH_MIN_SALARY <= h["salary"] <= budget
-                     and self.impl.get(h["team"], 0) >= med_impl
-                     and self.cash_use[h["name"]] < CASH_HITTER_CAP]
+                     and self.cash_use[h["name"]] < self.cash_hitter_cap]
             if not cands:
                 return None
             cands.sort(key=lambda x: -(x["avg26"] + rng.uniform(0, 0.5)))
@@ -406,6 +484,14 @@ class Builder:
         return lu_, salary
 
     def build_cash(self, n_cash):
+        self.n_cash = n_cash
+        self.cash_hitter_cap = max(2, round(CASH_HITTER_CAP_PCT * n_cash))
+        arms = [s for _, s in self.sp_df.iterrows() if self.caps[s["name"]] > 0]
+        legal = [(a, b) for i, a in enumerate(arms) for b in arms[i + 1:]
+                 if self.game_map[a["team"]] != self.game_map[b["team"]]]
+        self.n_pairs = len(legal)
+        self.best_pair_blended = max(
+            (a["adj_blended"] + b["adj_blended"] for a, b in legal), default=0.0)
         spec = {"stack": "CASH", "tier": "CASH", "size": 0, "bringback": False}
         for i in range(n_cash):
             built = False
@@ -482,8 +568,9 @@ class Builder:
             tcount[p["team"]] += 1
 
         fade_cap = round(FADE_APPEAR_CAP * self.n_lineups)
-        open_slots = [s for s in HITTER_SLOTS if s not in placed]
-        rng.shuffle(open_slots)
+        local_fade = defaultdict(int)   # count this lineup's picks too, or a
+        open_slots = [s for s in HITTER_SLOTS if s not in placed]  # single
+        rng.shuffle(open_slots)         # lineup can blow through the cap
         for slot in open_slots:
             rem = sum(1 for s in HITTER_SLOTS if s not in placed) - 1
             budget = SALARY_CAP - salary - rem * 2000
@@ -494,7 +581,9 @@ class Builder:
                      and (h["team"] == stack_t                       # Fix #15
                           or self.fill_appear[h["name"]] < fill_cap)
                      and not (h["team"] in self.fades
-                              and self.fade_appear[h["team"]] >= fade_cap)]
+                              and self.fade_appear[h["team"]]
+                              + local_fade[h["team"]]
+                              + self.fade_reserved.get(h["team"], 0) >= fade_cap)]
             if not cands:
                 return None
             cands.sort(key=lambda x: -(x["bs"] / max(x["salary"], 2000) * 1000
@@ -504,6 +593,8 @@ class Builder:
             salary += pick["salary"]
             used.add(pick["name"])
             tcount[pick["team"]] += 1
+            if pick["team"] in self.fades:
+                local_fade[pick["team"]] += 1
 
         if salary > SALARY_CAP:
             return None
@@ -536,7 +627,8 @@ class Builder:
                 self.sp_use[lu_["SP2"]["name"]] += 1
                 self.pair_use[tuple(sorted((lu_["SP1"]["name"], lu_["SP2"]["name"])))] += 1
                 for s in HITTER_SLOTS:
-                    if lu_[s]["team"] in self.fades:
+                    if (lu_[s]["team"] in self.fades
+                            and lu_[s]["team"] != spec["stack"]):
                         self.fade_appear[lu_[s]["team"]] += 1
                     if lu_[s]["team"] != spec["stack"]:              # Fix #15
                         self.fill_appear[lu_[s]["name"]] += 1
@@ -615,8 +707,9 @@ def main():
     ap = argparse.ArgumentParser(description="Build DK MLB Classic GPP portfolio.")
     ap.add_argument("--lineups", type=int, default=20,
                     help="total lineups, cash included")
-    ap.add_argument("--cash", type=int, default=5,
-                    help="floor-maximized single-entry lineups (0 = pure GPP)")
+    ap.add_argument("--cash", type=int, default=None,
+                    help="floor-maximized lineups (default 5, or ALL on a "
+                         "<=4-game slate; 0 = pure GPP)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--export", default=EXPORT_DIR)
     ap.add_argument("--selftest", action="store_true")
@@ -626,9 +719,26 @@ def main():
         return
 
     dk, lu, vegas, padj, hcache, opp_map, game_map, slate_date = load_data(args.export)
-    print(f"Slate {slate_date}: {dk['Game Info'].nunique()} games, {len(dk)} DK players")
+    n_games = dk["Game Info"].nunique()
+    print(f"Slate {slate_date}: {n_games} games, {len(dk)} DK players")
 
-    sp_df, caps, med = build_sp_pool(dk, lu, padj, opp_map, args.lineups)
+    # Fix #18 — on a thin slate the GPP tier ladder has nothing to
+    # differentiate into. 8/22 (3 games): cash lineups averaged 89.4 and took
+    # both cashes; ceiling/core/contrarian averaged 69.7. Build all-cash.
+    if args.cash is None:
+        args.cash = args.lineups if n_games <= SMALL_SLATE_GAMES else 5
+        if n_games <= SMALL_SLATE_GAMES:
+            print(f"  small slate ({n_games} games <= {SMALL_SLATE_GAMES}): "
+                  f"building the whole portfolio cash-style (Fix #18)")
+
+    sp_df, caps, med, feasible = build_sp_pool(dk, lu, padj, opp_map, args.lineups)
+    if feasible < args.lineups:
+        # Recompute the caps against the reduced count once so the ceiling is
+        # honest for the portfolio we actually build. One pass only — a very
+        # thin arm pool would otherwise ratchet the count down to nothing.
+        args.lineups = max(1, feasible)
+        args.cash = min(args.cash, args.lineups)
+        sp_df, caps, med, _ = build_sp_pool(dk, lu, padj, opp_map, args.lineups)
     print(f"\nSP pool ({len(sp_df)}), tiered by vegas-adj blended (median {med:.2f}):")
     print(sp_df[["name", "team", "opp", "salary", "adj_bs", "adj_blended", "cap"]]
           .to_string(index=False))
@@ -646,8 +756,13 @@ def main():
         print(f"  {t}: {n}  (implied {impl.get(t, float('nan')):.2f})")
 
     specs = make_specs(alloc, n_gpp)
+    fade_reserved = defaultdict(int)
+    for spec in specs:
+        if spec["stack"] in fades:
+            fade_reserved[spec["stack"]] += spec["size"]
     b = Builder(sp_df, caps, med, hit_pool, vegas, impl, fades,
-                opp_map, game_map, args.lineups, args.seed)
+                opp_map, game_map, args.lineups, args.seed,
+                fade_reserved=fade_reserved)
     if args.cash:
         print(f"\nBuilding {args.cash} cash lineups (floor-first)...")
         b.build_cash(args.cash)
