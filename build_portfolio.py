@@ -57,8 +57,10 @@ Hard constraints (audited on every lineup before anything is written):
     players; no duplicate lineups (and any two differ by >=2 players).
 """
 import argparse
+import os
 import random
 import re
+import shutil
 import sys
 import zlib
 from collections import defaultdict
@@ -66,6 +68,7 @@ from collections import defaultdict
 import pandas as pd
 
 EXPORT_DIR = r"G:\My Drive\DK\export"
+SNAPSHOT_DIR = r"G:\My Drive\DK\Snapshots"
 ABBR_REMAP = {"OAK": "ATH", "WAS": "WSH", "CHW": "CWS"}
 SALARY_CAP = 50000
 HITTER_SLOTS = ["C", "1B", "2B", "3B", "SS", "OF1", "OF2", "OF3"]
@@ -371,6 +374,8 @@ class Builder:
         self.cash_use = defaultdict(int)      # hitter appearances across cash set
         self.n_cash, self.n_pairs = 0, 1      # set properly by build_cash
         self.cash_hitter_cap, self.best_pair_blended = 3, 0.0
+        self.min_floor = MIN_FLOOR
+        self.reject = defaultdict(int)        # why attempts were thrown away
         self.seen_sigs = set()
         self.lineups = []
 
@@ -509,15 +514,18 @@ class Builder:
                 rng = stable_rng(self.seed, "CASH", i, attempt)
                 res = self.try_build_cash(rng)
                 if not res:
+                    self.reject["no valid construction"] += 1
                     continue
                 lu_, salary = res
                 s_new = set(self.sig(lu_))
                 if any(len(s_new - set(s0)) < 2 for s0 in self.seen_sigs):
+                    self.reject["too similar to an existing lineup"] += 1
                     continue
                 floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
                          + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
                                       reverse=True)[:5]) * 2.5)
-                if floor < MIN_FLOOR:
+                if floor < self.min_floor:
+                    self.reject["below MIN_FLOOR"] += 1
                     continue
                 self.seen_sigs.add(self.sig(lu_))
                 self.sp_use[lu_["SP1"]["name"]] += 1
@@ -622,15 +630,18 @@ class Builder:
                 rng = stable_rng(self.seed, spec["stack"], spec["tier"], attempt)
                 res = self.try_build(spec, rng)
                 if not res:
+                    self.reject["no valid construction"] += 1
                     continue
                 lu_, salary = res
                 s_new = set(self.sig(lu_))
                 if any(len(s_new - set(s0)) < 2 for s0 in self.seen_sigs):
+                    self.reject["too similar to an existing lineup"] += 1
                     continue
                 floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
                          + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
                                       reverse=True)[:5]) * 2.5)
-                if floor < MIN_FLOOR:
+                if floor < self.min_floor:
+                    self.reject["below MIN_FLOOR"] += 1
                     continue
                 self.seen_sigs.add(self.sig(lu_))
                 self.sp_use[lu_["SP1"]["name"]] += 1
@@ -722,6 +733,10 @@ def main():
                          "<=4-game slate; 0 = pure GPP)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--export", default=EXPORT_DIR)
+    ap.add_argument("--min-floor", type=float, default=MIN_FLOOR,
+                    help=f"reject lineups below this projected floor "
+                         f"(default {MIN_FLOOR}; 0 disables)")
+    ap.add_argument("--no-snapshot", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
@@ -773,6 +788,7 @@ def main():
     b = Builder(sp_df, caps, med, hit_pool, vegas, impl, fades,
                 opp_map, game_map, args.lineups, args.seed,
                 fade_reserved=fade_reserved)
+    b.min_floor = args.min_floor
     if args.cash:
         print(f"\nBuilding {args.cash} cash lineups (floor-first)...")
         b.build_cash(args.cash)
@@ -785,6 +801,11 @@ def main():
     cash_l.sort(key=lambda L: -(L["lineup"]["SP1"]["adj_blended"]
                                 + L["lineup"]["SP2"]["adj_blended"]))
     lineups = cash_l + [L for L in lineups if L["spec"]["tier"] != "CASH"]
+
+    if b.reject:
+        print("\nrejected attempts by reason:")
+        for why, n in sorted(b.reject.items(), key=lambda x: -x[1]):
+            print(f"  {n:>7,}  {why}")
 
     print(f"\nBuilt {len(lineups)} lineups; auditing...")
     if audit(lineups, game_map):
@@ -828,6 +849,41 @@ def main():
     print(f"wrote {sum_path}")
     if cash_idx:
         print(f"wrote {cash_path}  ({len(cash_idx)} single-entry cash lineups)")
+
+    if not args.no_snapshot:
+        snap = snapshot(args.export, slate_date, [up_path, sum_path]
+                        + ([cash_path] if cash_idx else []))
+        print(f"wrote snapshot -> {snap}")
+
+
+def snapshot(export, slate_date, built_files):
+    r"""Freeze this slate's inputs + outputs so it can be calibrated later.
+
+    The caches are overwritten every morning at 6 AM, so without this there is
+    no record of what the model believed BEFORE a slate — every post-hoc
+    accuracy test is either contaminated or impossible. Cheap insurance:
+    a few hundred KB per slate.
+    """
+    dest = os.path.join(SNAPSHOT_DIR, slate_date)
+    os.makedirs(dest, exist_ok=True)
+    inputs = ["hitter_bs_cache.csv", "pitcher_bs_cache.csv",
+              "pitcher_bs_cache_adj.csv", "vegas.csv", "mlb_odds.csv",
+              "Filtered_DKSalaries.csv", "Filtered_Lineups.csv"]
+    copied, missing = 0, []
+    for f in inputs:
+        src = os.path.join(export, f)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(dest, f))
+            copied += 1
+        else:
+            missing.append(f)
+    for f in built_files:
+        if os.path.exists(f):
+            shutil.copy2(f, os.path.join(dest, os.path.basename(f)))
+            copied += 1
+    if missing:
+        print(f"  snapshot: {len(missing)} input(s) not found: {', '.join(missing)}")
+    return f"{dest}  ({copied} files)"
 
 
 if __name__ == "__main__":
