@@ -17,17 +17,19 @@ readable summary:
         portfolio_summary_<date>.csv    one row per lineup: tier, stack, SPs, salary
 
 Usage:
-    python build_portfolio.py                # 5 cash + 15 GPP lineups, seed 42
-    python build_portfolio.py --lineups 20 --cash 5 --seed 7
-    python build_portfolio.py --cash 0       # pure GPP portfolio (old behavior)
+    python build_portfolio.py                # 20 GPP lineups, seed 42
+    python build_portfolio.py --cash 5       # force 5 floor-first lineups
+    python build_portfolio.py --lineups 20 --seed 7
     python build_portfolio.py --selftest     # audit-logic checks only, no files
 
-Cash mode (--cash N, default 5): the first N lineups are floor-maximized for
-single-entry double-ups — SP pairs from the top vegas-adj blended arms, hitters
-by avg26 (floor) from top-half implied-total teams, mini-stacks <=3, no punts
-below $3K, no darts. All lineups (cash + GPP) share uniqueness and exposure
-caps because the whole file also enters the mass-entry GPP; the cash subset is
-additionally written to DK_upload_cash_<date>.csv for the single-entry contests.
+Cash mode (--cash N) builds floor-maximized lineups — SP pairs from the top
+vegas-adj blended arms, hitters by avg26 from top-half implied-total teams,
+mini-stacks <=3, no punts below $3K, no darts — and writes them separately to
+DK_upload_cash_<date>.csv. They still share uniqueness and exposure caps with
+the GPP set because the whole file also enters the mass-entry contest.
+
+Default is 0 on a normal slate (Fix #20) and ALL lineups on a <=4-game slate
+(Fix #18) — those two rules come from opposite evidence and are both live.
 
 Strategy rules encoded (from the baseball-analyzer skill's Fix Registry):
     #6/#10  hard-fade offenses facing an SP with vegas-adj BS >= 55 or in the
@@ -50,6 +52,12 @@ Strategy rules encoded (from the baseball-analyzer skill's Fix Registry):
     #18     slates of <=SMALL_SLATE_GAMES games build all-cash — the GPP tier
             ladder needs a wide pool to be worth its variance (8/22, 3 games:
             cash lineups averaged 89.4 and took both cashes, GPP tiers 69.7)
+    #19     cash SP pairs must reach PAIR_FLOOR_PCT of the slate's best pair
+    #20     normal slates build ZERO cash lineups by default — the $1 single
+            entries went 0-for-9 over 8/22-8/23 at 10x the GPP entry fee, and
+            on a wide slate the tiered build outscored cash 85.9 vs 78.6.
+            Cash CONSTRUCTION still wins on small slates (#18); what stopped
+            was paying for separate single-entry contests.
 
 Hard constraints (audited on every lineup before anything is written):
     salary <= 50000; DK position eligibility respected; <=5 hitters per team;
@@ -729,8 +737,8 @@ def main():
     ap.add_argument("--lineups", type=int, default=20,
                     help="total lineups, cash included")
     ap.add_argument("--cash", type=int, default=None,
-                    help="floor-maximized lineups (default 5, or ALL on a "
-                         "<=4-game slate; 0 = pure GPP)")
+                    help="floor-maximized lineups (default: 0 on a normal "
+                         "slate, ALL on a <=4-game slate)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--export", default=EXPORT_DIR)
     ap.add_argument("--min-floor", type=float, default=MIN_FLOOR,
@@ -751,10 +759,14 @@ def main():
     # differentiate into. 8/22 (3 games): cash lineups averaged 89.4 and took
     # both cashes; ceiling/core/contrarian averaged 69.7. Build all-cash.
     if args.cash is None:
-        args.cash = args.lineups if n_games <= SMALL_SLATE_GAMES else 5
         if n_games <= SMALL_SLATE_GAMES:
+            args.cash = args.lineups
             print(f"  small slate ({n_games} games <= {SMALL_SLATE_GAMES}): "
                   f"building the whole portfolio cash-style (Fix #18)")
+        else:
+            args.cash = 0
+            print(f"  {n_games} games: full GPP build, no cash lineups "
+                  f"(Fix #20 — pass --cash N to build them anyway)")
 
     sp_df, caps, med, feasible = build_sp_pool(dk, lu, padj, opp_map, args.lineups)
     if feasible < args.lineups:
