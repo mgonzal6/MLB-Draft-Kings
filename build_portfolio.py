@@ -360,7 +360,7 @@ class Builder:
         self.fill_appear = defaultdict(int)   # Fix #15 — non-stack appearances
         self.cash_use = defaultdict(int)      # hitter appearances across cash set
         self.n_cash, self.n_pairs = 0, 1      # set properly by build_cash
-        self.cash_hitter_cap = 3
+        self.cash_hitter_cap, self.best_pair_blended = 3, 0.0
         self.seen_sigs = set()
         self.lineups = []
 
