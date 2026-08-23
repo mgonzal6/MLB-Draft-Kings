@@ -430,7 +430,21 @@ def main():
     print("Building pitcher_bs_cache_adj.csv ...")
     adj_df = build_sp_adjust(pit_df, lineups_df, vegas_df)
     if adj_df.empty:
-        print("  WARNING: no confirmed SPs matched the cache — check name normalization.")
+        # Distinguish "pulled too early, nothing confirmed yet" from a real
+        # name-match bug — they need completely different responses.
+        _lu = lineups_df.copy()
+        _lu.columns = _lu.columns.str.strip()
+        _bo = _lu["batting order"].astype(str).str.strip().str.upper()
+        _cf = _lu["confirmed"].astype(str).str.strip().str.upper()
+        n_sp = int((_bo == "SP").sum())
+        n_conf = int(((_bo == "SP") & (_cf == "Y")).sum())
+        if n_sp and not n_conf:
+            print(f"  WARNING: {n_sp} SPs listed but NONE are confirmed=Y yet — "
+                  f"the lineups file was pulled too early. Re-download closer "
+                  f"to lock. No adjusted SP table written.")
+        else:
+            print("  WARNING: no confirmed SPs matched the cache — "
+                  "check name normalization.")
     else:
         show = ["PLAYER", "team", "bs", "adj_bs", "blended", "adj_blended", "vegas_adj"]
         print(adj_df[show].to_string(index=False))

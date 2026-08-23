@@ -163,7 +163,17 @@ def build_sp_pool(dk, lu, padj, opp_map, n_lineups):
                      "blended": a["blended"]})
     sp_df = pd.DataFrame(rows)
     if sp_df.empty:
-        sys.exit("ERROR: no confirmed SPs matched — check inputs.")
+        # "Pulled too early" and "name-match bug" look identical here but need
+        # opposite responses, so say which one it is.
+        n_sp = int((lu["bo"] == "SP").sum())
+        n_conf = int(((lu["bo"] == "SP") & (lu["conf"] == "Y")).sum())
+        if n_sp and not n_conf:
+            sys.exit(f"ERROR: {n_sp} SPs listed but NONE confirmed=Y — the "
+                     f"lineups file was pulled too early. Re-download closer "
+                     f"to lock and rerun.")
+        sys.exit("ERROR: no confirmed SPs matched the cache/vegas table — "
+                 "check name normalization, or rerun vegas_sp_adjust.py "
+                 "(pitcher_bs_cache_adj.csv may be from a previous slate).")
 
     # Fix #12/#13 exposure caps
     med = sp_df["adj_blended"].median()
@@ -767,6 +777,14 @@ def main():
         print(f"\nBuilding {args.cash} cash lineups (floor-first)...")
         b.build_cash(args.cash)
     lineups = b.build_all(specs)
+
+    # Cash lineups go out best-armed first: SP pair blended is the strongest
+    # single predictor we have (Fix #13), so "enter the top N" is meaningful
+    # when the slate supports fewer lineups than requested.
+    cash_l = [L for L in lineups if L["spec"]["tier"] == "CASH"]
+    cash_l.sort(key=lambda L: -(L["lineup"]["SP1"]["adj_blended"]
+                                + L["lineup"]["SP2"]["adj_blended"]))
+    lineups = cash_l + [L for L in lineups if L["spec"]["tier"] != "CASH"]
 
     print(f"\nBuilt {len(lineups)} lineups; auditing...")
     if audit(lineups, game_map):
