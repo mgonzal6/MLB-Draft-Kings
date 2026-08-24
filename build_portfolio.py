@@ -40,7 +40,23 @@ Strategy rules encoded (from the baseball-analyzer skill's Fix Registry):
     #12     SP exposure: below-median vegas-adj blended -> <=20%; bottom two -> <=15%
     #13     SP tiers keyed on vegas-adjusted BLENDED (adj_bs is tiebreaker only)
     #14     stack allocation = 0.6*norm(top-4 hitter BS) + 0.4*norm(implied
-            total), hard cap 3 primary stacks per team
+            total), capped at MAX_STACKS_PER_TEAM (see #21)
+    #22     TESTED AND REJECTED (8/23): SHRINKING stacks to cut variance.
+            5-stacks really are higher-variance (sd 34.6 vs 15-19 for 3/4
+            stacks, corr(size, |pctile-50|) = +0.32) but the variance is the
+            product, not the defect. Two-slate net by schedule:
+            5,5,4 -1.40 | 5,4,3 -1.70 (current) | 4,4,3 -2.15 | 4,3,3 -2.35.
+            On 8/21 dropping the ceiling stack 5->4 destroyed the portfolio's
+            best lineup (139.45 @ rank 179 -> 112.45 @ rank 977) and took
+            winnings from $0.50 to $0.00. Knob kept as --stack-sizes.
+    #21     TESTED AND REJECTED (8/23): tightening the per-team stack cap from
+            3 to 2 does NOT reduce bad lineups. The motivation was sound —
+            69% of lineup-score variance on 8/23 came from which team was
+            stacked — but rebuilding at cap 2 left the WORST lineup unchanged
+            on both slates it applied to (8/21 60.60, 8/23 54.75), because the
+            freed slots just went to other teams that busted too. Money was a
+            wash to slightly worse (cap 3 -$1.70 vs cap 2 -$1.85 over 8/21 +
+            8/23). Knob kept as --max-stacks; default stays 3.
     #15     hitter fill cap: any hitter OUTSIDE the lineup's primary stack
             appears in <=20% of lineups (8/21: Peters 7/20 fills, 0 FPTS)
     #16     same-game override: between the two sides of one game, the
@@ -89,6 +105,7 @@ BELOW_MEDIAN_CAP, BOTTOM2_CAP = 0.20, 0.15
 ABSOLUTE_SP_CAP = 0.40      # Fix #17 — no arm ever exceeds this, scaling included
 FADE_APPEAR_CAP = 0.25
 FILL_CAP = 0.20             # Fix #15 — non-stack hitter appearance cap
+MAX_STACKS_PER_TEAM = 3     # see Fix #21 — 2 was tested and did NOT help
 HARD_AVOID_BS = 10          # SP adj_bs below this -> zero exposure
 SMALL_SLATE_GAMES = 4       # Fix #18 — at or below this, build all-cash
 
@@ -264,7 +281,8 @@ def build_hitter_pool(dk, lu, hcache, opp_map):
 # Allocation (Fix #14) + fades (Fix #6/#10)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map):
+def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
+                    max_stacks=MAX_STACKS_PER_TEAM):
     hit_df = pd.DataFrame(hit_pool)
     top4 = hit_df.groupby("team")["bs"].apply(lambda x: x.nlargest(4).sum())
     impl = pd.Series({t: vegas.loc[t, "implied_total"] if t in vegas.index else 4.0
@@ -279,19 +297,19 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map):
     pool = stackscore.drop(index=[t for t in fades if t in stackscore.index])
     if pool.empty:
         sys.exit("ERROR: every team is hard-faded — no stacks possible.")
-    alloc = (pool / pool.sum() * n_lineups).round().astype(int).clip(upper=3)
+    alloc = (pool / pool.sum() * n_lineups).round().astype(int).clip(upper=max_stacks)
     order = pool.sort_values(ascending=False).index.tolist()
     while alloc.sum() > n_lineups:
         for t in reversed(order):
             if alloc[t] > 0:
                 alloc[t] -= 1
                 break
-    # Top-up order: non-faded teams to cap 3, then faded teams to their Fix #6
-    # maximum of 1; on tiny slates where even that can't fill the count, raise
-    # the non-faded cap (never the faded one) until it fits.
+    # Top-up order: non-faded teams to max_stacks, then faded teams to their
+    # Fix #6 maximum of 1; on tiny slates where even that can't fill the count,
+    # raise the non-faded cap (never the faded one) until it fits.
     fade_order = [t for t in stackscore.sort_values(ascending=False).index
                   if t in fades]
-    caps_t = {t: 3 for t in order}
+    caps_t = {t: max_stacks for t in order}
     caps_t.update({t: 1 for t in fade_order})
     alloc = alloc.reindex(order + fade_order, fill_value=0)
     while alloc.sum() < n_lineups:
@@ -315,20 +333,23 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map):
     return alloc, impl, fades
 
 
-def make_specs(alloc, n_lineups):
-    """Tier assignment: ~20% ceiling (5-stacks), ~20% contrarian (3-stacks),
-    rest core (4-stacks)."""
+def make_specs(alloc, n_lineups, sizes=(5, 4, 3)):
+    """Tier assignment: ~20% ceiling, ~20% contrarian, rest core.
+
+    `sizes` is (ceiling, core, contrarian) stack sizes.
+    """
+    ceil_sz, core_sz, cont_sz = sizes
     n_ceil = max(1, round(n_lineups * 0.2))
     n_cont = max(1, round(n_lineups * 0.2))
     stack_list = [t for t, n in alloc.items() for _ in range(n)]
     specs, first_seen = [], set()
     for idx, team in enumerate(stack_list):
         if idx < n_ceil and team not in first_seen:
-            tier, size = "CEILING", 5
+            tier, size = "CEILING", ceil_sz
         elif idx >= len(stack_list) - n_cont:
-            tier, size = "CONTRARIAN", 3
+            tier, size = "CONTRARIAN", cont_sz
         else:
-            tier, size = "CORE", 4
+            tier, size = "CORE", core_sz
         first_seen.add(team)
         specs.append({"stack": team, "tier": tier, "size": size})
     return specs
@@ -741,6 +762,10 @@ def main():
                          "slate, ALL on a <=4-game slate)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--export", default=EXPORT_DIR)
+    ap.add_argument("--stack-sizes", default="5,4,3",
+                    help="ceiling,core,contrarian stack sizes (default 5,4,3)")
+    ap.add_argument("--max-stacks", type=int, default=MAX_STACKS_PER_TEAM,
+                    help=f"primary stacks per team (default {MAX_STACKS_PER_TEAM})")
     ap.add_argument("--min-floor", type=float, default=MIN_FLOOR,
                     help=f"reject lineups below this projected floor "
                          f"(default {MIN_FLOOR}; 0 disables)")
@@ -786,13 +811,17 @@ def main():
     n_gpp = args.lineups - args.cash
     if n_gpp < 0:
         sys.exit("ERROR: --cash cannot exceed --lineups")
-    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, n_gpp, opp_map)
+    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, n_gpp, opp_map,
+                                         max_stacks=args.max_stacks)
     print(f"\nHard fades (≤25% appearances): {sorted(fades)}")
     print(f"Primary-stack allocation ({n_gpp} GPP lineups):")
     for t, n in alloc.items():
         print(f"  {t}: {n}  (implied {impl.get(t, float('nan')):.2f})")
 
-    specs = make_specs(alloc, n_gpp)
+    sizes = tuple(int(x) for x in args.stack_sizes.split(","))
+    if len(sizes) != 3:
+        sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
+    specs = make_specs(alloc, n_gpp, sizes=sizes)
     fade_reserved = defaultdict(int)
     for spec in specs:
         if spec["stack"] in fades:
