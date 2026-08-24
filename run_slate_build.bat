@@ -21,7 +21,27 @@ echo ===== slate build started %DATE% %TIME% ===== > "%RUNLOG%"
 
 echo.
 echo ============================================================
-echo  Step 1 of 4 - Filter DK salaries + lineups
+echo  Step 0 of 5 - Preflight: are lineups posted yet?
+echo ============================================================
+rem Checked BEFORE the odds pull on purpose. Step 2 costs a paid API call,
+rem and on 8/24 three steps ran before anything noticed that no SP was
+rem confirmed - a fact readable from the raw Lineups CSV at second zero.
+python preflight.py
+if errorlevel 1 (
+    if /i not "%~1"=="force" (
+        echo Preflight stopped the build - lineups not posted. >> "%LOG%"
+        echo.
+        echo To build anyway: run_slate_build.bat force
+        pause
+        exit /b 1
+    )
+    echo *** FORCE requested - continuing past preflight. ***
+    echo Preflight failed but FORCE was given. >> "%LOG%"
+)
+
+echo.
+echo ============================================================
+echo  Step 1 of 5 - Filter DK salaries + lineups
 echo ============================================================
 python filtered_DK_Salaries.py
 if errorlevel 1 (
@@ -34,7 +54,7 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo  Step 2 of 4 - Pull MLB odds
+echo  Step 2 of 5 - Pull MLB odds
 echo ============================================================
 python mlb_odds.py --csv mlb_odds.csv >> "%RUNLOG%" 2>&1
 if errorlevel 1 (
@@ -46,7 +66,7 @@ if errorlevel 1 (
 
 echo.
 echo ============================================================
-echo  Step 3 of 4 - Vegas implied totals + SP adjust
+echo  Step 3 of 5 - Vegas implied totals + SP adjust
 echo ============================================================
 if not exist "G:\My Drive\DK\export\mlb_odds.csv" (
     echo WARNING: mlb_odds.csv missing - skipped vegas_sp_adjust. >> "%LOG%"
@@ -62,7 +82,7 @@ if not exist "G:\My Drive\DK\export\mlb_odds.csv" (
 
 echo.
 echo ============================================================
-echo  Step 4 of 4 - Build lineup portfolio
+echo  Step 4 of 5 - Build lineup portfolio
 echo ============================================================
 if not exist "G:\My Drive\DK\export\pitcher_bs_cache_adj.csv" (
     echo *** pitcher_bs_cache_adj.csv missing - skipping portfolio build. ***

@@ -153,14 +153,34 @@ def load_data(export_dir):
     lu.columns = lu.columns.str.strip()
 
     opp_map, game_map = {}, {}
-    slate_date = None
+    slate_date, slate_iso = None, None
     for gi in dk["Game Info"].unique():
         m = re.match(r"(\w+)@(\w+)\s+(\d{2}/\d{2}/\d{4})", str(gi))
         if m:
             a, h, d = m.groups()
             opp_map[a], opp_map[h] = h, a
             game_map[a] = game_map[h] = f"{a}@{h}"
-            slate_date = slate_date or d.replace("/", "_")
+            if slate_date is None:
+                slate_date = d.replace("/", "_")
+                mm, dd, yyyy = d.split("/")
+                slate_iso = f"{yyyy}-{mm}-{dd}"
+
+    # vegas_sp_adjust.py only rewrites pitcher_bs_cache_adj.csv when it
+    # succeeds, so an aborted run (lineups pulled before they posted, say)
+    # leaves the previous slate's SP table sitting right here. Building on it
+    # would silently price today's arms off yesterday's matchups.
+    stamp = ""
+    if "slate_date" in padj.columns and len(padj):
+        stamp = str(padj["slate_date"].iloc[0]).strip()
+    if not stamp:
+        print("  WARN pitcher_bs_cache_adj.csv has no slate_date stamp (written "
+              "before stamping existed) — cannot verify it is today's. Rerun "
+              "vegas_sp_adjust.py if the SP numbers look wrong.")
+    elif slate_iso and stamp != slate_iso:
+        sys.exit(f"ERROR: pitcher_bs_cache_adj.csv is stamped {stamp} but this "
+                 f"slate is {slate_iso} — vegas_sp_adjust.py did not complete "
+                 f"for today, so this is a stale SP table. Rerun the slate "
+                 f"build rather than building on yesterday's arms.")
 
     dk["nname"] = dk["Name"].map(norm)
     lu["team"] = lu["team code"].astype(str).str.strip().replace(ABBR_REMAP)

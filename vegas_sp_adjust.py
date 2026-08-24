@@ -449,8 +449,15 @@ def main():
         show = ["PLAYER", "team", "bs", "adj_bs", "blended", "adj_blended", "vegas_adj"]
         print(adj_df[show].to_string(index=False))
         adj_out = os.path.join(export, "pitcher_bs_cache_adj.csv")
+        # Stamp the slate this table was built for. This file is only
+        # rewritten when the step above succeeds, so an aborted run leaves the
+        # PREVIOUS slate's table sitting exactly where build_portfolio.py
+        # reads it — and nothing in the file itself said which day it was for.
+        # build_portfolio.py refuses to build on a mismatched stamp.
+        adj_df = adj_df.copy()
+        adj_df["slate_date"] = slate_date.isoformat() if slate_date else ""
         adj_df.to_csv(adj_out, index=False)
-        print(f"  wrote {adj_out}")
+        print(f"  wrote {adj_out}  (stamped slate_date={slate_date})")
         # Surface the anchor call the way the build should read it.
         top = adj_df.iloc[0]
         bs_leader = adj_df.loc[adj_df["bs"].idxmax(), "PLAYER"]
