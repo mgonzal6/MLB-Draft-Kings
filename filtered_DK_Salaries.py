@@ -20,6 +20,12 @@ dk_salaries_path = None
 try:
     for filename in os.listdir(folder_path):
         filename_lower = filename.lower()
+        # Safety net: Unmatched_*.csv now goes to 'export', but any stray copy
+        # left in 'load' would otherwise be picked up as an INPUT — those names
+        # contain 'lineup'/'dksalaries' and sort after the real downloads, so
+        # last-match-wins would silently choose them.
+        if 'unmatched' in filename_lower:
+            continue
         if 'lineup' in filename_lower and filename_lower.endswith('.csv'):
             lineups_path = os.path.join(folder_path, filename)
         elif 'dksalaries' in filename_lower and filename_lower.endswith('.csv'):
@@ -141,12 +147,13 @@ else:
 
     # 5. Save ALL datasets. The unmatched paths used to be built here but the
     # files were never actually written, which is why the Walton drop went
-    # unnoticed for days.
+    # unnoticed for days. All four go to 'export' — 'load' is kept to just the
+    # two manual DK downloads.
     output_matched_dk_path = os.path.join(folder_path_export, "Filtered_DKSalaries.csv")
-    output_unmatched_dk_path = os.path.join(folder_path, "Unmatched_DKSalaries.csv")
+    output_unmatched_dk_path = os.path.join(folder_path_export, "Unmatched_DKSalaries.csv")
 
     output_matched_lineups_path = os.path.join(folder_path_export, "Filtered_Lineups.csv")
-    output_unmatched_lineups_path = os.path.join(folder_path, "Unmatched_Lineups.csv")
+    output_unmatched_lineups_path = os.path.join(folder_path_export, "Unmatched_Lineups.csv")
 
     filtered_dk_salaries.to_csv(output_matched_dk_path, index=False)
     unmatched_dk_salaries.to_csv(output_unmatched_dk_path, index=False)
@@ -156,8 +163,7 @@ else:
 
     # 6. Summary report
     print("Success! Files have been generated in your G: Drive:")
-    print(" - Matched lists saved to 'export' folder.")
-    print(" - Unmatched lists saved to 'load' folder.")
+    print(" - Matched and unmatched lists saved to 'export' folder.")
     print("-" * 40)
     print(f"Total players originally in DK file:      {len(dk_salaries_df)}")
     print(f"Total players originally in lineup file:  {len(lineups_df)}")
