@@ -124,6 +124,22 @@ BRINGBACK_TOTAL = 8.0
 PAIR_CAP = 3                # same SP pair at most 3 times
 MIN_FLOOR = 80              # skill minimum entry threshold
 
+# ── A/B variants ────────────────────────────────────────────────────────────
+# Scores used to CHOOSE among valid lineups. 'control' has no score: the
+# builder accepts the first valid construction, which is what it has always
+# done. Keep these in sync with the columns build_portfolio writes into
+# portfolio_summary so metric_study.py can score the arms afterwards.
+VARIANTS = {
+    "ceiling": lambda lu_: (sum(lu_[s]["bs"] for s in HITTER_SLOTS)
+                            + lu_["SP1"]["adj_bs"] + lu_["SP2"]["adj_bs"]),
+    "proj_points": lambda lu_: (sum(lu_[s]["avg26"] for s in HITTER_SLOTS)
+                                + lu_["SP1"]["adj_blended"]
+                                + lu_["SP2"]["adj_blended"]),
+    # the one consistent signal so far: spending closer to the cap tracked
+    # with WORSE finishes on all five slates measured, so test the opposite
+    "cheap_arms": lambda lu_: -(lu_["SP1"]["salary"] + lu_["SP2"]["salary"]),
+}
+
 
 def norm(s):
     s = str(s).lower()
@@ -675,9 +691,23 @@ class Builder:
             return None
         return lu_, salary
 
-    def build_all(self, specs):
+    def build_all(self, specs, n_candidates=1, score=None):
+        r"""Fill each spec with a lineup.
+
+        With n_candidates=1 (the default) this accepts the FIRST valid
+        construction, exactly as it always has -- there is no selection step
+        anywhere in the builder, which is why `floor` correlated with nothing:
+        it was computed, reported, and never used to choose between lineups.
+        MIN_FLOOR is the only place it is read, and at 80 against lineups
+        scoring 122-144 it has never once fired.
+
+        With n_candidates>1 and a score function, collect that many valid
+        lineups for the spec and keep the best. Same stacks, same caps, same
+        constraints -- the only difference is choosing among valid lineups
+        instead of taking whichever the RNG produced first.
+        """
         for spec in specs:
-            built = False
+            cands = []
             for attempt in range(500):
                 rng = stable_rng(self.seed, spec["stack"], spec["tier"], attempt)
                 res = self.try_build(spec, rng)
@@ -695,23 +725,28 @@ class Builder:
                 if floor < self.min_floor:
                     self.reject["below MIN_FLOOR"] += 1
                     continue
-                self.seen_sigs.add(self.sig(lu_))
-                self.sp_use[lu_["SP1"]["name"]] += 1
-                self.sp_use[lu_["SP2"]["name"]] += 1
-                self.pair_use[tuple(sorted((lu_["SP1"]["name"], lu_["SP2"]["name"])))] += 1
-                for s in HITTER_SLOTS:
-                    if (lu_[s]["team"] in self.fades
-                            and lu_[s]["team"] != spec["stack"]):
-                        self.fade_appear[lu_[s]["team"]] += 1
-                    if lu_[s]["team"] != spec["stack"]:              # Fix #15
-                        self.fill_appear[lu_[s]["name"]] += 1
-                self.lineups.append({"spec": spec, "lineup": lu_,
-                                     "salary": salary, "floor": floor})
-                built = True
-                break
-            if not built:
+                cands.append((lu_, salary, floor))
+                if len(cands) >= n_candidates:
+                    break
+            if not cands:
                 print(f"  !! no unique valid lineup for {spec['stack']} "
                       f"({spec['tier']}) — skipping, never duplicating")
+                continue
+            if score is not None and len(cands) > 1:
+                cands.sort(key=lambda c: -score(c[0]))
+            lu_, salary, floor = cands[0]
+            self.seen_sigs.add(self.sig(lu_))
+            self.sp_use[lu_["SP1"]["name"]] += 1
+            self.sp_use[lu_["SP2"]["name"]] += 1
+            self.pair_use[tuple(sorted((lu_["SP1"]["name"], lu_["SP2"]["name"])))] += 1
+            for s in HITTER_SLOTS:
+                if (lu_[s]["team"] in self.fades
+                        and lu_[s]["team"] != spec["stack"]):
+                    self.fade_appear[lu_[s]["team"]] += 1
+                if lu_[s]["team"] != spec["stack"]:                  # Fix #15
+                    self.fill_appear[lu_[s]["name"]] += 1
+            self.lineups.append({"spec": spec, "lineup": lu_,
+                                 "salary": salary, "floor": floor})
         return self.lineups
 
 
@@ -784,6 +819,14 @@ def main():
                     help="floor-maximized lineups (default: 0 on a normal "
                          "slate, ALL on a <=4-game slate)")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--variant", default=None,
+                    choices=["control"] + sorted(VARIANTS),
+                    help="A/B arm. Omit for today's behaviour and today's "
+                         "filenames; 'control' is identical but writes "
+                         "_control-suffixed files for a paired experiment.")
+    ap.add_argument("--candidates", type=int, default=20,
+                    help="valid lineups to generate per slot before picking "
+                         "the best (ignored by control; default 20)")
     ap.add_argument("--export", default=EXPORT_DIR)
     ap.add_argument("--stack-sizes", default="5,4,3",
                     help="ceiling,core,contrarian stack sizes (default 5,4,3)")
@@ -856,7 +899,18 @@ def main():
     if args.cash:
         print(f"\nBuilding {args.cash} cash lineups (floor-first)...")
         b.build_cash(args.cash)
-    lineups = b.build_all(specs)
+    # A/B arms: 'control' is the shipping builder, byte-for-byte. Any other
+    # variant adds the selection step the builder has never had, so the two
+    # can be entered in the SAME contest -- which controls for slate
+    # difficulty, the thing that made sequential day-to-day comparison
+    # useless (floor read +0.55 one day and -0.72 the next).
+    if args.variant in (None, "control"):
+        lineups = b.build_all(specs)
+    else:
+        score = VARIANTS[args.variant]
+        print(f"\nvariant '{args.variant}': choosing best of {args.candidates} "
+              f"valid candidates per lineup")
+        lineups = b.build_all(specs, n_candidates=args.candidates, score=score)
 
     # Cash lineups go out best-armed first: SP pair blended is the strongest
     # single predictor we have (Fix #13), so "enter the top N" is meaningful
@@ -898,6 +952,7 @@ def main():
         sps = [lu_["SP1"], lu_["SP2"]]
         srows.append({"#": i + 1,
                       "lineup_id": lineup_id([lu_[s]["name"] for s in ALL_SLOTS]),
+                      "variant": args.variant or "control",
                       "tier": L["spec"]["tier"], "stack": L["spec"]["stack"],
                       "SP1": lu_["SP1"]["name"], "SP2": lu_["SP2"]["name"],
                       "teams": " ".join(f"{t}x{n}" for t, n in
@@ -918,14 +973,17 @@ def main():
                       "hitter_salary": sum(h["salary"] for h in hit),
                       # correlation proxy — bigger stacks swing harder
                       "max_stack": max(tc.values()) if tc else 0})
+    # Omitting --variant keeps today's filenames untouched; naming an arm
+    # suffixes them so both can sit side by side for the same slate.
+    tagged = f"{slate_date}_{args.variant}" if args.variant else slate_date
     cols = ["P", "P", "C", "1B", "2B", "3B", "SS", "OF", "OF", "OF"]
     up = pd.DataFrame(rows)
     up.columns = cols
-    up_path = f"{args.export}\\DK_upload_{slate_date}.csv"
+    up_path = f"{args.export}\\DK_upload_{tagged}.csv"
     archive_if_different(up_path, up)
     up.to_csv(up_path, index=False)
     summary = pd.DataFrame(srows)
-    sum_path = f"{args.export}\\portfolio_summary_{slate_date}.csv"
+    sum_path = f"{args.export}\\portfolio_summary_{tagged}.csv"
     archive_if_different(sum_path, summary)
     summary.to_csv(sum_path, index=False)
 
@@ -933,7 +991,7 @@ def main():
     if cash_idx:
         cash_up = pd.DataFrame([rows[i] for i in cash_idx])
         cash_up.columns = cols
-        cash_path = f"{args.export}\\DK_upload_cash_{slate_date}.csv"
+        cash_path = f"{args.export}\\DK_upload_cash_{tagged}.csv"
         cash_up.to_csv(cash_path, index=False)
 
     # Printed view stays readable; the CSV carries the candidate metrics too.
@@ -1000,10 +1058,20 @@ def snapshot(export, slate_date, built_files):
     dest = os.path.join(SNAPSHOT_DIR, slate_date)
     # A second slate on the same date would overwrite the first slate's frozen
     # inputs, which is exactly the record this function exists to protect.
-    # Only a genuinely different slate triggers the rename: same-slate reruns
-    # leave an identical upload file behind and pass through untouched.
-    prior = os.path.join(dest, os.path.basename(built_files[0]))
-    if os.path.isdir(dest) and not os.path.exists(prior):
+    # Test the SLATE, not the filenames: two A/B arms write different upload
+    # names for the same slate and must share one snapshot, while a genuinely
+    # new slate brings a different Filtered_DKSalaries.csv.
+    same_slate = False
+    prior_dk = os.path.join(dest, "Filtered_DKSalaries.csv")
+    if os.path.exists(prior_dk):
+        try:
+            same_slate = (pd.read_csv(prior_dk)["Name + ID"].tolist()
+                          == pd.read_csv(os.path.join(export,
+                                                      "Filtered_DKSalaries.csv"))
+                          ["Name + ID"].tolist())
+        except Exception:
+            same_slate = False
+    if os.path.isdir(dest) and not same_slate:
         stamp = datetime.fromtimestamp(os.path.getmtime(dest)).strftime("%H%M")
         moved = f"{dest}_prev{stamp}"
         n = 2

@@ -38,6 +38,10 @@ def summaries():
     seen = {}
     for d in [POST_DIR, EXPORT_DIR] + sorted(glob.glob(os.path.join(SNAPSHOT_DIR, "*"))):
         for p in glob.glob(os.path.join(d, "portfolio_summary_*.csv")):
+            # _prevHHMM files are superseded records kept for safety, not
+            # separate slates -- counting them would weight one slate twice.
+            if "_prev" in os.path.basename(p):
+                continue
             seen.setdefault(os.path.basename(p), p)
     return sorted(seen.values())
 
@@ -92,7 +96,7 @@ def main():
         raise SystemExit(f"no post_entries_*.csv with lineup_id in {POST_DIR}\n"
                          f"run post_contest.py first")
 
-    paired, pooled = [], []
+    paired, pooled, paired_keys = [], [], []
     for sp in summaries():
         try:
             s = pd.read_csv(sp)
@@ -120,6 +124,14 @@ def main():
         name, e = best
         m = s.merge(e, on="lineup_id", how="inner")
         tag = os.path.basename(sp).replace("portfolio_summary_", "").replace(".csv", "")
+        # An A/B arm is a DIFFERENT set of lineups in the same contest and must
+        # be kept. A summary holding the SAME lineups as one already paired to
+        # that contest (e.g. `_control`, which is byte-identical to the plain
+        # build) is the same data under another name -- keep one.
+        key = (name, frozenset(m["lineup_id"]))
+        if key in {k for k, _, _, _ in paired_keys}:
+            continue
+        paired_keys.append((key, tag, name, m))
         paired.append((tag, name, m))
         pooled.append(m.assign(_slate=tag))
 
