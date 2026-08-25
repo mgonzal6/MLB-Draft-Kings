@@ -209,7 +209,11 @@ def main():
                                                list(own["Player"].astype(str)))
     print(f"slate file: {os.path.basename(slate_dir)}  "
           f"({cov:.0%} of contest players matched)")
-    if cov < 0.50 or margin < 0.05:
+    # A tie between the live export and its own snapshot is the NORMAL case
+    # for the slate just built -- both hold the same file, so a small margin
+    # there means agreement, not ambiguity. Only treat a tie as ambiguous when
+    # coverage is also mediocre.
+    if cov < 0.60 or (margin < 0.05 and cov < 0.85):
         print("  WARNING: no slate folder clearly matches this contest — "
               "salary and value columns may be unreliable. "
               "Pass --slate-dir explicitly.")
