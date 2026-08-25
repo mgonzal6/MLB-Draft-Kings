@@ -61,6 +61,33 @@ def read_salaries(salaries_path):
     return dk
 
 
+def check_classic(dk, path):
+    """Reject anything that is not a DK Classic salary file.
+
+    A Tiers export (Roster Position = T1..T6, no Salary column) sails through
+    every earlier check: filtered_DK_Salaries.py only needs Name and
+    TeamAbbrev, so the run reaches build_portfolio.py before dying on the
+    missing Salary column -- after spending the odds call. Catch it here.
+    """
+    if dk is None:
+        return f"cannot read {os.path.basename(path)}"
+    missing = [c for c in ("Salary", "Roster Position", "Game Info",
+                           "TeamAbbrev", "Name + ID") if c not in dk.columns]
+    if missing:
+        kind = ("looks like a TIERS contest file"
+                if "Salary" in missing and "Roster Position" in dk.columns
+                else "is not a Classic salary export")
+        return (f"{os.path.basename(path)} {kind} — missing column(s): "
+                f"{', '.join(missing)}")
+    slots = set()
+    for rp in dk["Roster Position"].astype(str):
+        slots.update(rp.split("/"))
+    if not slots & {"P", "C", "1B", "2B", "3B", "SS", "OF"}:
+        return (f"{os.path.basename(path)} has no Classic roster positions "
+                f"(saw {sorted(slots)[:6]}) — wrong contest type")
+    return None
+
+
 def slate_teams(dk):
     """Teams actually on the DK slate, in DK's abbreviations."""
     if dk is None or "TeamAbbrev" not in dk.columns:
@@ -107,6 +134,15 @@ def main():
     # Count only slate teams, otherwise this reports 20 SPs where every
     # downstream script reports 14.
     dk = read_salaries(salaries_path)
+    bad = check_classic(dk, salaries_path)
+    if bad:
+        print("-" * 60)
+        print(f"PREFLIGHT: {bad}")
+        print("  This pipeline builds DK Classic lineups only. Download the")
+        print("  Classic slate's DKSalaries file, or run the contest by hand.")
+        print("  Nothing was spent -- no odds API call was made.")
+        print("-" * 60)
+        return 2
     on_slate = slate_teams(dk)
     if on_slate:
         lu_team = lu["team code"].astype(str).str.strip().str.upper().replace(ABBR_REMAP)

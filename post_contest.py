@@ -30,8 +30,11 @@ from collections import Counter
 
 import pandas as pd
 
+from lineup_id import lineup_id
+
 POST_DIR = r"G:\My Drive\DK\Post Contest"
 EXPORT_DIR = r"G:\My Drive\DK\export"
+SNAPSHOT_DIR = r"G:\My Drive\DK\Snapshots"
 POS_TOKENS = {"P", "C", "1B", "2B", "3B", "SS", "OF"}
 
 # Payout curve for the $0.10 / 3,567-entry GPP. ROI is reported ONLY when the
@@ -130,12 +133,52 @@ def exposure_counts(lineups):
     return c
 
 
-def load_salaries():
-    path = os.path.join(EXPORT_DIR, "Filtered_DKSalaries.csv")
+def load_salaries(slate_dir):
+    path = os.path.join(slate_dir, "Filtered_DKSalaries.csv")
     if not os.path.exists(path):
+        print(f"  NOTE: no Filtered_DKSalaries.csv in {slate_dir} — "
+              f"salary and value columns will be blank.\n")
         return None
     sal = pd.read_csv(path)[["Name", "Salary", "TeamAbbrev"]].drop_duplicates("Name")
     return sal.set_index("Name")
+
+
+def _coverage(slate_dir, players):
+    """Share of the contest's players present in that slate's salary file."""
+    path = os.path.join(slate_dir, "Filtered_DKSalaries.csv")
+    if not os.path.exists(path) or not players:
+        return 0.0
+    try:
+        names = set(pd.read_csv(path)["Name"].astype(str))
+    except Exception:
+        return 0.0
+    return sum(1 for p in players if p in names) / len(players)
+
+
+def resolve_slate_dir(explicit, players):
+    r"""Pick the salary file that actually matches this contest.
+
+    EXPORT_DIR holds whatever slate was built LAST, so analyzing an earlier
+    contest against it silently mismatches every player not on the current
+    slate (running the early card against the late card's export left every
+    TEX and CWS player unmatched, blanking their value column). Snapshots are
+    frozen per slate, so score every candidate by how much of the contest's
+    player pool it contains and take the best.
+    """
+    if explicit:
+        return explicit, _coverage(explicit, players), 1.0
+    cands = [EXPORT_DIR] + sorted(glob.glob(os.path.join(SNAPSHOT_DIR, "*")))
+    scored = sorted(((_coverage(d, players), d) for d in cands if os.path.isdir(d)),
+                    reverse=True)
+    if not scored:
+        return EXPORT_DIR, 0.0, 0.0
+    best_cov, best = scored[0]
+    # Coverage never approaches 100%: Filtered_DKSalaries.csv holds only the
+    # confirmed starters (139 rows on this slate) while the contest lists every
+    # player anyone rostered (174). So judge by SEPARATION from the runner-up,
+    # not by an absolute bar -- the right slate stands clear of the wrong ones.
+    margin = best_cov - scored[1][0] if len(scored) > 1 else 1.0
+    return best, best_cov, margin
 
 
 def fmt_pct(x):
@@ -148,6 +191,10 @@ def main():
     ap.add_argument("--user", default="fancyplayer")
     ap.add_argument("--top-pct", type=float, default=1.0,
                     help="field slice (in %%) used for 'what the winners played'")
+    ap.add_argument("--slate-dir", default=None,
+                    help="folder holding this slate's Filtered_DKSalaries.csv "
+                         "(default: auto-pick the snapshot matching the "
+                         "contest's players, else the live export folder)")
     args = ap.parse_args()
 
     path = args.csv or newest_standings_csv()
@@ -158,7 +205,16 @@ def main():
     standings, own = load_standings(path)
     fpts = own.set_index("Player")["FPTS"]
     field_own = own.set_index("Player")["%Drafted"]
-    salaries = load_salaries()
+    slate_dir, cov, margin = resolve_slate_dir(args.slate_dir,
+                                               list(own["Player"].astype(str)))
+    print(f"slate file: {os.path.basename(slate_dir)}  "
+          f"({cov:.0%} of contest players matched)")
+    if cov < 0.50 or margin < 0.05:
+        print("  WARNING: no slate folder clearly matches this contest — "
+              "salary and value columns may be unreliable. "
+              "Pass --slate-dir explicitly.")
+    print()
+    salaries = load_salaries(slate_dir)
 
     n_field = len(standings)
     mine = standings[standings["EntryName"].map(entry_user) == args.user.lower()].copy()
@@ -198,7 +254,10 @@ def main():
         won_s = f"  won ${won:.2f}" if won else ""
         print(f"  rank {int(r['Rank']):>5} (top {r['pctile']:4.1f}%)  "
               f"{r['Points']:6.2f} pts{sal_s}{won_s}{flag}")
+        # lineup_id joins these results back to portfolio_summary_<date>.csv,
+        # so "did my highest-ranked lineups score best?" becomes answerable.
         rows.append({"Rank": int(r["Rank"]), "Pctile": round(r["pctile"], 1),
+                     "lineup_id": lineup_id(names),
                      "Points": r["Points"], "Salary": sal, "Won": round(won, 2),
                      "DupCount": dups, "Lineup": r["Lineup"]})
     n_dupes = int((dup_groups > 1).sum())

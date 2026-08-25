@@ -88,8 +88,11 @@ import shutil
 import sys
 import zlib
 from collections import defaultdict
+from datetime import datetime
 
 import pandas as pd
+
+from lineup_id import lineup_id
 
 EXPORT_DIR = r"G:\My Drive\DK\export"
 SNAPSHOT_DIR = r"G:\My Drive\DK\Snapshots"
@@ -881,7 +884,11 @@ def main():
         tc = defaultdict(int)
         for s in HITTER_SLOTS:
             tc[lu_[s]["team"]] += 1
-        srows.append({"#": i + 1, "tier": L["spec"]["tier"], "stack": L["spec"]["stack"],
+        # lineup_id is the join key back to post_entries_<contest>.csv --
+        # without it the model's own ranking cannot be tested against results.
+        srows.append({"#": i + 1,
+                      "lineup_id": lineup_id([lu_[s]["name"] for s in ALL_SLOTS]),
+                      "tier": L["spec"]["tier"], "stack": L["spec"]["stack"],
                       "SP1": lu_["SP1"]["name"], "SP2": lu_["SP2"]["name"],
                       "teams": " ".join(f"{t}x{n}" for t, n in
                                         sorted(tc.items(), key=lambda x: -x[1])),
@@ -890,9 +897,11 @@ def main():
     up = pd.DataFrame(rows)
     up.columns = cols
     up_path = f"{args.export}\\DK_upload_{slate_date}.csv"
+    archive_if_different(up_path, up)
     up.to_csv(up_path, index=False)
     summary = pd.DataFrame(srows)
     sum_path = f"{args.export}\\portfolio_summary_{slate_date}.csv"
+    archive_if_different(sum_path, summary)
     summary.to_csv(sum_path, index=False)
 
     cash_idx = [i for i, L in enumerate(lineups) if L["spec"]["tier"] == "CASH"]
@@ -917,6 +926,40 @@ def main():
         print(f"wrote snapshot -> {snap}")
 
 
+def archive_if_different(path, new_df):
+    r"""Preserve an existing same-date file before overwriting it.
+
+    Both output names key on slate_date alone, so a SECOND slate on the same
+    calendar day (an early card plus a late card) silently destroyed the first
+    one's record -- including lineups already entered. Rerunning the same slate
+    is common and harmless, so only archive when the content actually differs.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        old = pd.read_csv(path)
+        new = new_df.reset_index(drop=True)
+        # Compare VALUES, not frames: the upload file has duplicate column
+        # names (P, P, OF, OF, OF) which read_csv mangles to P.1/OF.1, so
+        # .equals() would report a difference on every single rerun.
+        if (old.shape == new.shape
+                and (old.astype(str).values == new.astype(str).values).all()):
+            return None                      # same slate rebuilt, nothing lost
+    except Exception:
+        pass                                 # unreadable -> archive to be safe
+    stem, ext = os.path.splitext(path)
+    stamp = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%H%M")
+    dest = f"{stem}_prev{stamp}{ext}"
+    n = 2
+    while os.path.exists(dest):
+        dest = f"{stem}_prev{stamp}_{n}{ext}"
+        n += 1
+    shutil.move(path, dest)
+    print(f"  NOTE: existing {os.path.basename(path)} was for a different "
+          f"slate -- archived to {os.path.basename(dest)}")
+    return dest
+
+
 def snapshot(export, slate_date, built_files):
     r"""Freeze this slate's inputs + outputs so it can be calibrated later.
 
@@ -926,6 +969,21 @@ def snapshot(export, slate_date, built_files):
     a few hundred KB per slate.
     """
     dest = os.path.join(SNAPSHOT_DIR, slate_date)
+    # A second slate on the same date would overwrite the first slate's frozen
+    # inputs, which is exactly the record this function exists to protect.
+    # Only a genuinely different slate triggers the rename: same-slate reruns
+    # leave an identical upload file behind and pass through untouched.
+    prior = os.path.join(dest, os.path.basename(built_files[0]))
+    if os.path.isdir(dest) and not os.path.exists(prior):
+        stamp = datetime.fromtimestamp(os.path.getmtime(dest)).strftime("%H%M")
+        moved = f"{dest}_prev{stamp}"
+        n = 2
+        while os.path.exists(moved):
+            moved = f"{dest}_prev{stamp}_{n}"
+            n += 1
+        shutil.move(dest, moved)
+        print(f"  NOTE: snapshot for {slate_date} was a different slate -- "
+              f"archived to {os.path.basename(moved)}")
     os.makedirs(dest, exist_ok=True)
     inputs = ["hitter_bs_cache.csv", "pitcher_bs_cache.csv",
               "pitcher_bs_cache_adj.csv", "vegas.csv", "mlb_odds.csv",
