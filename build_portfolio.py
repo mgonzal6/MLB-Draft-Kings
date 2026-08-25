@@ -884,15 +884,40 @@ def main():
         tc = defaultdict(int)
         for s in HITTER_SLOTS:
             tc[lu_[s]["team"]] += 1
-        # lineup_id is the join key back to post_entries_<contest>.csv --
-        # without it the model's own ranking cannot be tested against results.
+        # CANDIDATE RANKING METRICS — recorded, NOT used to build anything.
+        #
+        # Measured over 5 slates (78 lineups joined by lineup_id), floor_target
+        # showed no consistent relationship with realised scores: +0.63 and
+        # +0.67 on 08/21-08/22, 0.00 on 08/23, -0.66 and -0.75 on 08/24, and
+        # +0.015 pooled on within-slate ranks. It spreads only ~2.6x narrower
+        # than actual scores do, so it cannot separate lineups that finish 90
+        # points apart. Rather than refit the objective against five slates of
+        # noise, record the alternatives on every build and let the evidence
+        # accumulate; metric_study.py scores them once there is enough of it.
+        hit = [lu_[s] for s in HITTER_SLOTS]
+        sps = [lu_["SP1"], lu_["SP2"]]
         srows.append({"#": i + 1,
                       "lineup_id": lineup_id([lu_[s]["name"] for s in ALL_SLOTS]),
                       "tier": L["spec"]["tier"], "stack": L["spec"]["stack"],
                       "SP1": lu_["SP1"]["name"], "SP2": lu_["SP2"]["name"],
                       "teams": " ".join(f"{t}x{n}" for t, n in
                                         sorted(tc.items(), key=lambda x: -x[1])),
-                      "salary": L["salary"], "floor": round(L["floor"], 1)})
+                      "salary": L["salary"],
+                      # renamed from "floor": it is a construction target, not
+                      # a points projection, and reading it as one is why a
+                      # 142 was ever expected to beat a 124.
+                      "floor_target": round(L["floor"], 1),
+                      # straight expected points, all 8 bats (floor_target uses
+                      # only the top 5, and weights them 2.5x)
+                      "proj_points": round(sum(h["avg26"] for h in hit)
+                                           + sum(p["adj_blended"] for p in sps), 1),
+                      # upside rather than downside: breakout scores
+                      "ceiling": round(sum(h["bs"] for h in hit)
+                                       + sum(p["adj_bs"] for p in sps), 1),
+                      # tests the "stop buying arms, spend on bats" hypothesis
+                      "hitter_salary": sum(h["salary"] for h in hit),
+                      # correlation proxy — bigger stacks swing harder
+                      "max_stack": max(tc.values()) if tc else 0})
     cols = ["P", "P", "C", "1B", "2B", "3B", "SS", "OF", "OF", "OF"]
     up = pd.DataFrame(rows)
     up.columns = cols
@@ -911,7 +936,11 @@ def main():
         cash_path = f"{args.export}\\DK_upload_cash_{slate_date}.csv"
         cash_up.to_csv(cash_path, index=False)
 
-    print(f"\n{summary.to_string(index=False)}")
+    # Printed view stays readable; the CSV carries the candidate metrics too.
+    shown = ["#", "tier", "stack", "SP1", "SP2", "teams", "salary", "floor_target"]
+    print(f"\n{summary[shown].to_string(index=False)}")
+    print(f"  (+ proj_points, ceiling, hitter_salary, max_stack recorded in "
+          f"{os.path.basename(sum_path)} for metric_study.py)")
     print("\nSP exposure:")
     for n, c in sorted(b.sp_use.items(), key=lambda x: -x[1]):
         print(f"  {n}: {c}/{caps[n]}")
