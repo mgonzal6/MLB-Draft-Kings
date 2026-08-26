@@ -37,27 +37,37 @@ EXPORT_DIR = r"G:\My Drive\DK\export"
 SNAPSHOT_DIR = r"G:\My Drive\DK\Snapshots"
 POS_TOKENS = {"P", "C", "1B", "2B", "3B", "SS", "OF"}
 
-# Payout curve for the $0.10 / 3,567-entry GPP. ROI is reported ONLY when the
-# contest's field matches PAYOUT_FIELD — a different contest has a different
+# Payout curves, keyed by field size. ROI is reported ONLY when the contest's
+# field matches one of these exactly — a different contest has a different
 # curve, and printing dollars from the wrong table is worse than printing none.
-ENTRY_FEE = 0.10
-PAYOUT_FIELD = 3567
-PAYOUTS = [(1, 1, 30.00), (2, 2, 15.00), (3, 3, 10.00), (4, 4, 5.00),
-           (5, 5, 4.00), (6, 7, 3.00), (8, 10, 2.00), (11, 15, 1.50),
-           (16, 20, 1.00), (21, 30, 0.75), (31, 60, 0.50), (61, 130, 0.40),
-           (131, 340, 0.30), (341, 830, 0.20)]
+# Add a structure by pasting its placement/payout rows from DK.
+PAYOUT_TABLES = {
+    # $0.10 GPP, $300 pool
+    3567: {"fee": 0.10,
+           "payouts": [(1, 1, 30.00), (2, 2, 15.00), (3, 3, 10.00), (4, 4, 5.00),
+                       (5, 5, 4.00), (6, 7, 3.00), (8, 10, 2.00), (11, 15, 1.50),
+                       (16, 20, 1.00), (21, 30, 0.75), (31, 60, 0.50),
+                       (61, 130, 0.40), (131, 340, 0.30), (341, 830, 0.20)]},
+    # $0.10 GPP, $100 pool, 277 paying spots
+    1189: {"fee": 0.10,
+           "payouts": [(1, 1, 10.00), (2, 2, 6.00), (3, 3, 4.00), (4, 4, 3.00),
+                       (5, 5, 2.00), (6, 6, 1.50), (7, 8, 1.00), (9, 12, 0.75),
+                       (13, 22, 0.50), (23, 52, 0.40), (53, 117, 0.30),
+                       (118, 277, 0.20)]},
+}
 
 
-def pos_payout(p):
-    for lo, hi, amt in PAYOUTS:
+def pos_payout(p, payouts):
+    for lo, hi, amt in payouts:
         if lo <= p <= hi:
             return amt
     return 0.0
 
 
-def entry_payout(rank, tie_size):
+def entry_payout(rank, tie_size, payouts):
     """DK splits the payouts of the occupied positions across tied entries."""
-    return sum(pos_payout(p) for p in range(rank, rank + tie_size)) / tie_size
+    return sum(pos_payout(p, payouts)
+               for p in range(rank, rank + tie_size)) / tie_size
 
 
 # ---------------------------------------------------------------- parsing
@@ -246,12 +256,14 @@ def main():
     dup_groups = lineup_keys.map(Counter(lineup_keys))
     mine["pctile"] = mine["Rank"] / n_field * 100
     tie_sizes = standings.groupby("Rank")["EntryId"].count()
-    roi_ok = n_field == PAYOUT_FIELD
+    table = PAYOUT_TABLES.get(n_field)
+    roi_ok = table is not None
     rows, total_won = [], 0.0
     for (_, r), dups in zip(mine.iterrows(), dup_groups):
         names = [n for _, n in r["players"]]
         sal = int(salaries["Salary"].reindex(names).sum()) if salaries is not None else None
-        won = entry_payout(int(r["Rank"]), int(tie_sizes[r["Rank"]])) if roi_ok else 0.0
+        won = (entry_payout(int(r["Rank"]), int(tie_sizes[r["Rank"]]),
+                            table["payouts"]) if roi_ok else 0.0)
         total_won += won
         flag = f"  DUPE x{dups}" if dups > 1 else ""
         sal_s = f"  ${sal}" if sal and sal > 0 else ""
@@ -270,13 +282,14 @@ def main():
               f"lineups -- wasted entry diversity.")
 
     if roi_ok:
-        cost = len(mine) * ENTRY_FEE
+        cost = len(mine) * table["fee"]
         net = total_won - cost
         print(f"\n  ROI: won ${total_won:.2f} on ${cost:.2f} in entries -> "
               f"net ${net:+.2f} ({net / cost * 100:+.0f}%)")
     else:
-        print(f"\n  (ROI skipped: payout table is for a {PAYOUT_FIELD}-entry "
-              f"contest, this one has {n_field} — edit PAYOUTS to enable)")
+        known = ", ".join(str(k) for k in sorted(PAYOUT_TABLES))
+        print(f"\n  (ROI skipped: no payout table for a {n_field}-entry "
+              f"contest; have {known} — add one to PAYOUT_TABLES to enable)")
 
     # ---- my exposure vs field
     my_counts = exposure_counts(mine["players"])
