@@ -129,15 +129,42 @@ MIN_FLOOR = 80              # skill minimum entry threshold
 # builder accepts the first valid construction, which is what it has always
 # done. Keep these in sync with the columns build_portfolio writes into
 # portfolio_summary so metric_study.py can score the arms afterwards.
+#
+# 'top' is how many of the best-scoring candidates to sample from. top=1 is
+# argmax, and on 08/25 argmax was actively harmful: the ceiling arm's realised
+# scores had HALF the spread of control (sd 20.1 vs 40.2, range 72.5 vs 142.6)
+# while the mean barely moved (60.2 vs 58.5). Its lineups also overlapped each
+# other more (1.25 shared players per pair vs 1.01) -- taking the single best
+# of 20 keeps landing on the same players, the portfolio correlates, and the
+# tail disappears. In a GPP the tail is the entire point: control's 147.45
+# finished 5th and paid, its median of 55.00 paid nothing.
+def _sum_bs(lu_):
+    return (sum(lu_[s]["bs"] for s in HITTER_SLOTS)
+            + lu_["SP1"]["adj_bs"] + lu_["SP2"]["adj_bs"])
+
+
+def _top3_bs(lu_):
+    """Concentrated upside: reward a few spiky bats, not eight balanced ones.
+    Summing all 8 is what averages the spikes away."""
+    return (sum(sorted((lu_[s]["bs"] for s in HITTER_SLOTS), reverse=True)[:3])
+            + max(lu_["SP1"]["adj_bs"], lu_["SP2"]["adj_bs"]))
+
+
 VARIANTS = {
-    "ceiling": lambda lu_: (sum(lu_[s]["bs"] for s in HITTER_SLOTS)
-                            + lu_["SP1"]["adj_bs"] + lu_["SP2"]["adj_bs"]),
-    "proj_points": lambda lu_: (sum(lu_[s]["avg26"] for s in HITTER_SLOTS)
-                                + lu_["SP1"]["adj_blended"]
-                                + lu_["SP2"]["adj_blended"]),
+    "ceiling": {"score": _sum_bs, "top": 1},
+    "proj_points": {"score": lambda lu_: (sum(lu_[s]["avg26"] for s in HITTER_SLOTS)
+                                          + lu_["SP1"]["adj_blended"]
+                                          + lu_["SP2"]["adj_blended"]), "top": 1},
     # the one consistent signal so far: spending closer to the cap tracked
     # with WORSE finishes on all five slates measured, so test the opposite
-    "cheap_arms": lambda lu_: -(lu_["SP1"]["salary"] + lu_["SP2"]["salary"]),
+    "cheap_arms": {"score": lambda lu_: -(lu_["SP1"]["salary"]
+                                          + lu_["SP2"]["salary"]), "top": 1},
+    # ---- keep the quality tilt, drop the convergence ----
+    # Same ceiling score, but sample from the best 5 instead of taking the
+    # single best, so lineups stay different from each other.
+    "topk": {"score": _sum_bs, "top": 5},
+    # Chase spikes rather than balance, and still sample.
+    "boom": {"score": _top3_bs, "top": 5},
 }
 
 
@@ -691,7 +718,7 @@ class Builder:
             return None
         return lu_, salary
 
-    def build_all(self, specs, n_candidates=1, score=None):
+    def build_all(self, specs, n_candidates=1, score=None, top=1):
         r"""Fill each spec with a lineup.
 
         With n_candidates=1 (the default) this accepts the FIRST valid
@@ -734,6 +761,14 @@ class Builder:
                 continue
             if score is not None and len(cands) > 1:
                 cands.sort(key=lambda c: -score(c[0]))
+                if top > 1:
+                    # Sample the best few rather than always taking #1.
+                    # Deterministic in the seed, so a rerun reproduces exactly.
+                    pool = cands[:min(top, len(cands))]
+                    pick = stable_rng(self.seed, spec["stack"], spec["tier"],
+                                      "select").randrange(len(pool))
+                    cands = [pool[pick]] + [c for i, c in enumerate(pool)
+                                            if i != pick]
             lu_, salary, floor = cands[0]
             self.seen_sigs.add(self.sig(lu_))
             self.sp_use[lu_["SP1"]["name"]] += 1
@@ -907,10 +942,13 @@ def main():
     if args.variant in (None, "control"):
         lineups = b.build_all(specs)
     else:
-        score = VARIANTS[args.variant]
-        print(f"\nvariant '{args.variant}': choosing best of {args.candidates} "
-              f"valid candidates per lineup")
-        lineups = b.build_all(specs, n_candidates=args.candidates, score=score)
+        cfg = VARIANTS[args.variant]
+        how = ("best" if cfg["top"] == 1
+               else f"a random one of the top {cfg['top']}")
+        print(f"\nvariant '{args.variant}': choosing {how} of "
+              f"{args.candidates} valid candidates per lineup")
+        lineups = b.build_all(specs, n_candidates=args.candidates,
+                              score=cfg["score"], top=cfg["top"])
 
     # Cash lineups go out best-armed first: SP pair blended is the strongest
     # single predictor we have (Fix #13), so "enter the top N" is meaningful
