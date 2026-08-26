@@ -123,6 +123,15 @@ FADE_SP_BS = 55             # opposing offense hard-faded above this
 BRINGBACK_TOTAL = 8.0
 PAIR_CAP = 3                # same SP pair at most 3 times
 MIN_FLOOR = 80              # skill minimum entry threshold
+# Combined salary of the two SPs. None = unconstrained, which is what the
+# builder has always done. Measured over 10,965 entries across 5 contests
+# (08/23-08/25), SP spend ran the WRONG way against finishing position in
+# every contest (r = -0.02, -0.25, -0.20, -0.17, -0.29; pooled slate-demeaned
+# -0.161). Entries in the 14-16k bucket reached the top 1% at 2.14%, against
+# 0.40% for 20k+, and the top 1% of finishers averaged $16,582 on arms while
+# the bottom half averaged $17,809. Our own portfolios sat at 16.3-19.0k with
+# 15 of 19 lineups in the two worst buckets on 08/24.
+SP_PAIR_SALARY_CAP = 16000
 
 # ── A/B variants ────────────────────────────────────────────────────────────
 # Scores used to CHOOSE among valid lineups. 'control' has no score: the
@@ -165,6 +174,18 @@ VARIANTS = {
     "topk": {"score": _sum_bs, "top": 5},
     # Chase spikes rather than balance, and still sample.
     "boom": {"score": _top3_bs, "top": 5},
+    # ---- budget arms: cap what the two SPs may cost ----
+    # score None = control's own "first valid construction", so the ONLY
+    # difference from control is the salary ceiling. That isolates the cap:
+    # bundling it with a selection rule would leave the two indistinguishable.
+    # spend16 targets the observed-best 14-16k bucket; spend15 and spend17
+    # bracket it so the backtest can see whether the level or just the
+    # direction is what matters.
+    "spend16": {"score": None, "top": 1, "sp_cap": 16000},
+    "spend15": {"score": None, "top": 1, "sp_cap": 15000},
+    "spend17": {"score": None, "top": 1, "sp_cap": 17000},
+    # the cap combined with topk's quality tilt, to check they do not fight
+    "spend_topk": {"score": _sum_bs, "top": 5, "sp_cap": 16000},
 }
 
 
@@ -470,6 +491,8 @@ class Builder:
         self.n_cash, self.n_pairs = 0, 1      # set properly by build_cash
         self.cash_hitter_cap, self.best_pair_blended = 3, 0.0
         self.min_floor = MIN_FLOOR
+        # None keeps the historical behaviour; set by a variant or --sp-cap.
+        self.sp_salary_cap = None
         self.reject = defaultdict(int)        # why attempts were thrown away
         self.seen_sigs = set()
         self.lineups = []
@@ -489,32 +512,63 @@ class Builder:
             pref = [s for s in elig if 10 <= s["adj_bs"] < 40]
         else:
             pref = [s for s in elig if s["adj_blended"] >= self.med]
-        # Try the preferred tier first; if it can't produce a single valid
-        # pair (small slates: same-game clashes, pair caps), fall back to the
-        # full eligible pool rather than failing the lineup outright.
-        for pool in (pref, elig):
-            if not pool:
-                continue
-            rng.shuffle(pool)
-            pool.sort(key=lambda s: -(s["adj_blended"] + rng.uniform(0, 5)))
-            pairs = []
-            for a in pool:
-                for b in pool:
-                    if a["name"] == b["name"]:
-                        continue
-                    if self.game_map[a["team"]] == self.game_map[b["team"]]:
-                        continue
-                    key = tuple(sorted((a["name"], b["name"])))
-                    if self.pair_use[key] >= PAIR_CAP:
-                        continue
-                    if (b["name"], a["name"]) not in [(y["name"], x["name"])
-                                                      for x, y in pairs]:
-                        pairs.append((a, b))
-                    if len(pairs) >= 6:
-                        return pairs
-            if pairs:
-                return pairs
+        cap = self.sp_salary_cap
+        # A salary cap thins the legal pair pool badly: on 08/24, PAIR_CAP=3
+        # against the capped pool filled 7 of 20 lineups and silently dropped
+        # the rest. Scale per-pair reuse to what the capped pool can actually
+        # support -- the same trick cash_sp_pair uses when the cash set
+        # outnumbers the legal pairs.
+        pair_cap = PAIR_CAP
+        if cap:
+            legal = sum(1 for i, a in enumerate(elig) for b in elig[i + 1:]
+                        if self.game_map[a["team"]] != self.game_map[b["team"]]
+                        and a["salary"] + b["salary"] <= cap)
+            pair_cap = max(PAIR_CAP, -(-self.n_lineups // max(1, legal)))
+        # Pass 1 honours the cap. Pass 2 exists only when a cap is set: rather
+        # than drop the lineup, spend over budget by as little as possible,
+        # so the cap degrades into a strong preference on thin slates instead
+        # of shrinking the portfolio.
+        passes = [(cap, False)] if not cap else [(cap, False), (None, True)]
+        for pass_cap, cheapest_first in passes:
+            for pool in (pref, elig):
+                if not pool:
+                    continue
+                pool = list(pool)
+                rng.shuffle(pool)
+                if cheapest_first:
+                    pool.sort(key=lambda s: s["salary"])
+                else:
+                    pool.sort(key=lambda s: -(s["adj_blended"] + rng.uniform(0, 5)))
+                pairs = self._form_pairs(pool, pair_cap, pass_cap)
+                if pairs:
+                    return pairs
         return []
+
+    def _form_pairs(self, pool, pair_cap, cap):
+        """Up to 6 legal (a, b) SP pairs from `pool`.
+
+        `cap` None means unconstrained, which is the historical behaviour and
+        the only path `control` ever takes.
+        """
+        pairs = []
+        for a in pool:
+            for b in pool:
+                if a["name"] == b["name"]:
+                    continue
+                if self.game_map[a["team"]] == self.game_map[b["team"]]:
+                    continue
+                if cap is not None and a["salary"] + b["salary"] > cap:
+                    self.reject["SP pair over salary cap"] += 1
+                    continue
+                key = tuple(sorted((a["name"], b["name"])))
+                if self.pair_use[key] >= pair_cap:
+                    continue
+                if (b["name"], a["name"]) not in [(y["name"], x["name"])
+                                                  for x, y in pairs]:
+                    pairs.append((a, b))
+                if len(pairs) >= 6:
+                    return pairs
+        return pairs
 
     def cash_sp_pair(self, rng):
         """Best available pair by summed vegas-adj blended — floor arms first.
@@ -867,6 +921,10 @@ def main():
                     help="ceiling,core,contrarian stack sizes (default 5,4,3)")
     ap.add_argument("--max-stacks", type=int, default=MAX_STACKS_PER_TEAM,
                     help=f"primary stacks per team (default {MAX_STACKS_PER_TEAM})")
+    ap.add_argument("--sp-cap", type=int, default=None,
+                    help="cap the two SPs' combined salary (e.g. 16000). "
+                         "Overrides the variant's own cap; 0 disables it. "
+                         "Omit for the historical unconstrained behaviour")
     ap.add_argument("--min-floor", type=float, default=MIN_FLOOR,
                     help=f"reject lineups below this projected floor "
                          f"(default {MIN_FLOOR}; 0 disables)")
@@ -939,10 +997,33 @@ def main():
     # can be entered in the SAME contest -- which controls for slate
     # difficulty, the thing that made sequential day-to-day comparison
     # useless (floor read +0.55 one day and -0.72 the next).
+    cfg = VARIANTS[args.variant] if args.variant not in (None, "control") else {}
+    # --sp-cap wins over the variant's own so one arm can be swept across
+    # levels without editing VARIANTS; 0 means "explicitly uncapped".
+    cap = cfg.get("sp_cap") if args.sp_cap is None else (args.sp_cap or None)
+    b.sp_salary_cap = cap
+    if cap:
+        # The tier caps key off adj_blended, so the below-median arms a salary
+        # cap forces us onto are limited to BOTTOM2/BELOW_MEDIAN (15-20%) and
+        # run dry mid-build -- 08/23 then fell back over the cap on 10 of 20
+        # lineups, leaving the arm barely distinguishable from control. Let
+        # every usable arm run to the same ABSOLUTE_SP_CAP ceiling the rest of
+        # the builder already respects (0 stays 0: HARD_AVOID_BS still bans).
+        # This widens WHO may be used; the salary filter still decides who is.
+        ceiling = max(1, round(ABSOLUTE_SP_CAP * args.lineups))
+        for name in list(caps):
+            if caps[name] > 0:
+                caps[name] = ceiling
+        print(f"\nSP pair salary capped at {cap:,}; per-arm exposure "
+              f"levelled to {ceiling}/{args.lineups}")
     if args.variant in (None, "control"):
         lineups = b.build_all(specs)
+    elif cfg["score"] is None:
+        # Cap-only arm: control's own selection, so the cap is the sole
+        # difference. Going through build_all(specs) keeps that exact.
+        print(f"\nvariant '{args.variant}': control selection, salary cap only")
+        lineups = b.build_all(specs)
     else:
-        cfg = VARIANTS[args.variant]
         how = ("best" if cfg["top"] == 1
                else f"a random one of the top {cfg['top']}")
         print(f"\nvariant '{args.variant}': choosing {how} of "
