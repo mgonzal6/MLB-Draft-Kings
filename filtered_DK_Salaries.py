@@ -2,6 +2,8 @@ import pandas as pd
 import os
 import re # We need the regex library for advanced text replacing
 
+import slate_io
+
 # Define your specific folder path
 folder_path = r"G:\My Drive\DK\load"
 folder_path_export = r"G:\My Drive\DK\export"
@@ -16,22 +18,17 @@ ROWS_PER_TEAM = 10
 lineups_path = None
 dk_salaries_path = None
 
-# Loop through all files to find matches
-try:
-    for filename in os.listdir(folder_path):
-        filename_lower = filename.lower()
-        # Safety net: Unmatched_*.csv now goes to 'export', but any stray copy
-        # left in 'load' would otherwise be picked up as an INPUT — those names
-        # contain 'lineup'/'dksalaries' and sort after the real downloads, so
-        # last-match-wins would silently choose them.
-        if 'unmatched' in filename_lower:
-            continue
-        if 'lineup' in filename_lower and filename_lower.endswith('.csv'):
-            lineups_path = os.path.join(folder_path, filename)
-        elif 'dksalaries' in filename_lower and filename_lower.endswith('.csv'):
-            dk_salaries_path = os.path.join(folder_path, filename)
-except FileNotFoundError:
+# Shared with preflight.py so the two cannot disagree about which file is
+# today's input. It also accepts .xlsx: the lineups feed served one on 08/26
+# and a .csv-only filter reports it as missing, which reads as "lineups not
+# posted" rather than "wrong extension". Unmatched_*.csv now goes to 'export',
+# but a stray copy left in 'load' would otherwise be picked up as an INPUT —
+# those names contain 'lineup'/'dksalaries' and sort after the real downloads,
+# so last-match-wins would silently choose them; find_inputs skips them.
+if not os.path.isdir(folder_path):
     print(f"Error: The folder '{folder_path}' could not be found.")
+else:
+    lineups_path, dk_salaries_path = slate_io.find_inputs(folder_path)
 
 if not lineups_path or not dk_salaries_path:
     print("Error: Missing either the Lineups or DKSalaries file.")
@@ -51,8 +48,8 @@ else:
     print("-" * 40)
 
     # 1. Load the datasets
-    lineups_df = pd.read_csv(lineups_path)
-    dk_salaries_df = pd.read_csv(dk_salaries_path)
+    lineups_df = slate_io.read_table(lineups_path)
+    dk_salaries_df = slate_io.read_table(dk_salaries_path)
 
     # 2. Clean column headers
     lineups_df.columns = lineups_df.columns.str.strip()

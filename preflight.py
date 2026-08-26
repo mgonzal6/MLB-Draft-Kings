@@ -21,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
+import slate_io
+
 try:
     from zoneinfo import ZoneInfo
     _ET = ZoneInfo("America/New_York")
@@ -36,25 +38,15 @@ ABBR_REMAP = {"OAK": "ATH", "WAS": "WSH", "CHW": "CWS"}
 
 
 def find_inputs():
-    lineups = salaries = None
-    try:
-        for fn in os.listdir(LOAD):
-            low = fn.lower()
-            if not low.endswith(".csv"):
-                continue
-            if "lineup" in low and "unmatched" not in low:
-                lineups = os.path.join(LOAD, fn)
-            elif "dksalaries" in low and "unmatched" not in low:
-                salaries = os.path.join(LOAD, fn)
-    except FileNotFoundError:
+    lineups, salaries = slate_io.find_inputs(LOAD)
+    if lineups is None and salaries is None and not os.path.isdir(LOAD):
         print(f"PREFLIGHT: cannot read {LOAD}")
-        return None, None
     return lineups, salaries
 
 
 def read_salaries(salaries_path):
     try:
-        dk = pd.read_csv(salaries_path)
+        dk = slate_io.read_table(salaries_path)
     except Exception:
         return None
     dk.columns = dk.columns.str.strip()
@@ -120,7 +112,7 @@ def main():
         return 2
 
     try:
-        lu = pd.read_csv(lineups_path)
+        lu = slate_io.read_table(lineups_path)
     except Exception as e:
         print(f"PREFLIGHT: cannot read {os.path.basename(lineups_path)}: {e}")
         return 2
