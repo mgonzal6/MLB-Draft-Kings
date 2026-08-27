@@ -122,7 +122,20 @@ CASH_MIN_SPEND = 48000      # cash lineups must use the cap
 FADE_SP_BS = 55             # opposing offense hard-faded above this
 BRINGBACK_TOTAL = 8.0
 PAIR_CAP = 3                # same SP pair at most 3 times
-MIN_FLOOR = 80              # skill minimum entry threshold
+# MIN_FLOOR is gone. It gated on floor_target, which never once fired: across
+# 177 lineups floor_target ran 92.4-144.5 against a threshold of 80, so 0 were
+# ever rejected. Raising the threshold could not fix it either, because it
+# ranks the bad lineups HIGH -- the worst lineup of 08/25 (4.9 pts realised)
+# scored 133.3, above that slate's median of 125.2 -- and within slates it is
+# anti-predictive (Spearman -0.140 over 5 contests, 1,370 lineups).
+#
+# Twelve candidate replacements were scored the same way. The best,
+# min_hit_sal (the cheapest bat's salary), managed +0.135 clustered by contest
+# (p=0.091) and then halved on the two slates it was not chosen from
+# (+0.149 -> +0.062). Nothing cleared the bar, so nothing replaces it: an
+# unused gate is better than a gate pointing the wrong way. floor_target is
+# still COMPUTED and recorded, because metric_study.py scores replacements
+# against it.
 # Combined salary of the two SPs. None = unconstrained, which is what the
 # builder has always done. Measured over 10,965 entries across 5 contests
 # (08/23-08/25), SP spend ran the WRONG way against finishing position in
@@ -490,7 +503,6 @@ class Builder:
         self.cash_use = defaultdict(int)      # hitter appearances across cash set
         self.n_cash, self.n_pairs = 0, 1      # set properly by build_cash
         self.cash_hitter_cap, self.best_pair_blended = 3, 0.0
-        self.min_floor = MIN_FLOOR
         # None keeps the historical behaviour; set by a variant or --sp-cap.
         self.sp_salary_cap = None
         self.reject = defaultdict(int)        # why attempts were thrown away
@@ -673,9 +685,6 @@ class Builder:
                 floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
                          + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
                                       reverse=True)[:5]) * 2.5)
-                if floor < self.min_floor:
-                    self.reject["below MIN_FLOOR"] += 1
-                    continue
                 self.seen_sigs.add(self.sig(lu_))
                 self.sp_use[lu_["SP1"]["name"]] += 1
                 self.sp_use[lu_["SP2"]["name"]] += 1
@@ -778,9 +787,8 @@ class Builder:
         With n_candidates=1 (the default) this accepts the FIRST valid
         construction, exactly as it always has -- there is no selection step
         anywhere in the builder, which is why `floor` correlated with nothing:
-        it was computed, reported, and never used to choose between lineups.
-        MIN_FLOOR is the only place it is read, and at 80 against lineups
-        scoring 122-144 it has never once fired.
+        it is computed and reported, never used to choose between lineups.
+        It no longer gates anything either -- see the MIN_FLOOR note up top.
 
         With n_candidates>1 and a score function, collect that many valid
         lineups for the spec and keep the best. Same stacks, same caps, same
@@ -803,9 +811,6 @@ class Builder:
                 floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
                          + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
                                       reverse=True)[:5]) * 2.5)
-                if floor < self.min_floor:
-                    self.reject["below MIN_FLOOR"] += 1
-                    continue
                 cands.append((lu_, salary, floor))
                 if len(cands) >= n_candidates:
                     break
@@ -925,9 +930,6 @@ def main():
                     help="cap the two SPs' combined salary (e.g. 16000). "
                          "Overrides the variant's own cap; 0 disables it. "
                          "Omit for the historical unconstrained behaviour")
-    ap.add_argument("--min-floor", type=float, default=MIN_FLOOR,
-                    help=f"reject lineups below this projected floor "
-                         f"(default {MIN_FLOOR}; 0 disables)")
     ap.add_argument("--no-snapshot", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
@@ -988,7 +990,6 @@ def main():
     b = Builder(sp_df, caps, med, hit_pool, vegas, impl, fades,
                 opp_map, game_map, args.lineups, args.seed,
                 fade_reserved=fade_reserved)
-    b.min_floor = args.min_floor
     if args.cash:
         print(f"\nBuilding {args.cash} cash lineups (floor-first)...")
         b.build_cash(args.cash)
