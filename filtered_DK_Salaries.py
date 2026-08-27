@@ -76,7 +76,15 @@ else:
             r'\bmichael\b': 'mike',
             r'\bleonardo\b': 'leo',
             r'\bmatthew\b': 'matt',
-            r'\bchristopher\b': 'chris'
+            r'\bchristopher\b': 'chris',
+            # 8/27: lineups said "Enrique Hernandez", DK said "Kike
+            # Hernandez", and LAD built stacks from 8 batters instead of 9.
+            # The rescue pass below could not save it: it keys on last name
+            # plus FIRST INITIAL, and E != K. Mapped nickname -> given name,
+            # the opposite direction to the four above, because "Enrique" is
+            # a name other players legitimately have while "Kike" is only
+            # ever this one.
+            r'\bkike\b': 'enrique',
         }
         for long_name, short_name in nicknames.items():
             s = s.replace(long_name, short_name, regex=True)
