@@ -199,6 +199,33 @@ VARIANTS = {
     "spend17": {"score": None, "top": 1, "sp_cap": 17000},
     # the cap combined with topk's quality tilt, to check they do not fight
     "spend_topk": {"score": _sum_bs, "top": 5, "sp_cap": 16000},
+    # ---- weakest-spot floor: the rule three studies converged on ----
+    # Not a variance play. min_hit_sal was the best of 12 floor candidates
+    # (+0.135) and own_min the only ownership metric to clear significance
+    # (+0.126, p=0.015, 12 contests / 27k lineups) -- both say the lineup is
+    # decided by its worst roster spot, which is exactly what the deleted
+    # MIN_FLOOR could not see. CASH_MIN_SALARY=3000 already does this for
+    # cash; the GPP path has never had an equivalent. Fills only: a stack is a
+    # contiguous batting-order run and cannot be cherry-picked without
+    # breaking the correlation it exists for.
+    #
+    # Swept at 3000/3500/4000 over 224 builds, 7 slates x 8 seeds, paired and
+    # slate-clustered. 4000 was significantly WORSE (top10 -0.72, p=0.029) and
+    # 3500 was mixed; both are dropped. 3000 nudged every tail metric the
+    # right way -- best +1.71, best_rank -9.44, top10 +0.02, and top-10% per
+    # lineup 0.0962 vs control's 0.0916 -- and is the only arm tested all
+    # session that did NOT buy it out of spread (sd -0.55, t=-0.90; every
+    # other arm ran -2 to -4).
+    #
+    # It is NOT proven, and one check argues against it: replayed at seed 42,
+    # the seed real builds use, the top lineup finished worse on 6 of 7
+    # slates, turning a rank 3 of 911 into rank 41 and a rank 5 of 1,189 into
+    # rank 31. Across all 8 seeds it is a coin flip (better on 30 slate-seeds,
+    # worse on 25), and it wins 4-2 on MEDIAN rank -- seed 42 is simply a good
+    # draw for control. Every delta has |t| < 0.7. Kept opt-in for re-testing
+    # once there are more than 5 independent contests; do not ship it as the
+    # default on this evidence.
+    "hitfloor3000": {"score": None, "top": 1, "hitter_min_salary": 3000},
     # ---- tested and rejected, do not rebuild ----
     # 08/26: capping the CHEAPER arm instead of the pair (7,000) was tried to
     # fix the hole where a 15,000 pair cap made Jesus Luzardo -- $10,100 and
@@ -525,6 +552,7 @@ class Builder:
         self.cash_hitter_cap, self.best_pair_blended = 3, 0.0
         # None keeps the historical behaviour; set by a variant or --sp-cap.
         self.sp_salary_cap = None
+        self.hitter_min_salary = None
         self.reject = defaultdict(int)        # why attempts were thrown away
         self.seen_sigs = set()
         self.lineups = []
@@ -767,19 +795,43 @@ class Builder:
         local_fade = defaultdict(int)   # count this lineup's picks too, or a
         open_slots = [s for s in HITTER_SLOTS if s not in placed]  # single
         rng.shuffle(open_slots)         # lineup can blow through the cap
+        # The fill sort below is bs/salary with the denominator clamped at
+        # 2000, so a minimum-priced bat wins on ties by construction. That is
+        # where our punts come from: we roster 3.62 sub-5%-owned players per
+        # lineup against the field's 2.25. A floor here is the only rule that
+        # three separate studies pointed at -- min_hit_sal (+0.135), and
+        # own_min (+0.126, p=0.015 over 12 contests and 27k lineups) both say
+        # the WEAKEST roster spot decides the lineup. It applies to fills
+        # only: a stack is a contiguous batting-order run, so its members
+        # cannot be cherry-picked without breaking the correlation it exists
+        # for.
+        floor = self.hitter_min_salary or 0
         for slot in open_slots:
             rem = sum(1 for s in HITTER_SLOTS if s not in placed) - 1
-            budget = SALARY_CAP - salary - rem * 2000
-            cands = [h for h in self.hit_pool
-                     if slot in h["slots"] and h["name"] not in used
-                     and h["team"] not in banned and tcount[h["team"]] < 5
-                     and h["salary"] <= budget
-                     and (h["team"] == stack_t                       # Fix #15
-                          or self.fill_appear[h["name"]] < fill_cap)
-                     and not (h["team"] in self.fades
-                              and self.fade_appear[h["team"]]
-                              + local_fade[h["team"]]
-                              + self.fade_reserved.get(h["team"], 0) >= fade_cap)]
+            # reserve the floor, not 2000, or the last slots price themselves
+            # out and the lineup dies late
+            budget = SALARY_CAP - salary - rem * max(2000, floor)
+
+            def eligible(min_sal):
+                return [h for h in self.hit_pool
+                        if slot in h["slots"] and h["name"] not in used
+                        and h["team"] not in banned and tcount[h["team"]] < 5
+                        and h["salary"] <= budget and h["salary"] >= min_sal
+                        and (h["team"] == stack_t                   # Fix #15
+                             or self.fill_appear[h["name"]] < fill_cap)
+                        and not (h["team"] in self.fades
+                                 and self.fade_appear[h["team"]]
+                                 + local_fade[h["team"]]
+                                 + self.fade_reserved.get(h["team"], 0) >= fade_cap)]
+
+            cands = eligible(floor)
+            if not cands and floor:
+                # Thin slate or tight budget: take the best available under
+                # the floor rather than dropping the lineup. Same degradation
+                # the SP caps use -- a floor that silently shrinks the
+                # portfolio is worse than one that bends.
+                self.reject["no fill hitter at or above floor"] += 1
+                cands = eligible(0)
             if not cands:
                 return None
             cands.sort(key=lambda x: -(x["bs"] / max(x["salary"], 2000) * 1000
@@ -946,6 +998,9 @@ def main():
                     help="ceiling,core,contrarian stack sizes (default 5,4,3)")
     ap.add_argument("--max-stacks", type=int, default=MAX_STACKS_PER_TEAM,
                     help=f"primary stacks per team (default {MAX_STACKS_PER_TEAM})")
+    ap.add_argument("--hitter-min-salary", type=int, default=None,
+                    help="floor the salary of every NON-STACK hitter (e.g. "
+                         "3000). Overrides the variant's own; 0 disables")
     ap.add_argument("--sp-cap", type=int, default=None,
                     help="cap the two SPs' combined salary (e.g. 16000). "
                          "Overrides the variant's own cap; 0 disables it. "
@@ -1023,6 +1078,11 @@ def main():
     # levels without editing VARIANTS; 0 means "explicitly uncapped".
     cap = cfg.get("sp_cap") if args.sp_cap is None else (args.sp_cap or None)
     b.sp_salary_cap = cap
+    hfloor = (cfg.get("hitter_min_salary") if args.hitter_min_salary is None
+              else (args.hitter_min_salary or None))
+    b.hitter_min_salary = hfloor
+    if hfloor:
+        print(f"\nnon-stack hitters floored at {hfloor:,}")
     if cap:
         # The tier caps key off adj_blended, so the below-median arms a salary
         # cap forces us onto are limited to BOTTOM2/BELOW_MEDIAN (15-20%) and
