@@ -199,6 +199,26 @@ VARIANTS = {
     "spend17": {"score": None, "top": 1, "sp_cap": 17000},
     # the cap combined with topk's quality tilt, to check they do not fight
     "spend_topk": {"score": _sum_bs, "top": 5, "sp_cap": 16000},
+    # ---- tested and rejected, do not rebuild ----
+    # 08/26: capping the CHEAPER arm instead of the pair (7,000) was tried to
+    # fix the hole where a 15,000 pair cap made Jesus Luzardo -- $10,100 and
+    # the slate's top scorer at 35.4 -- impossible to roster at all. It did fix
+    # that: the arm rostered him in 8 of 20 lineups, same as control. It still
+    # LOST, and on the metric that matters. Over 336 builds, 7 slates x 8
+    # seeds, paired and slate-clustered against control:
+    #
+    #     arm         best   best_rank   top10        sd
+    #     value_arm  -4.24   +33.2 *     -0.69 *   -3.50
+    #     value_boom -2.57   +14.5       -0.58 *   -3.29
+    #     (* p < 0.05; top10 = lineups in the field's top 10%, of 20)
+    #
+    # The premise was that keeping aces rosterable would preserve the tail. It
+    # did not -- both arms compressed spread as hard as the pair cap does
+    # (-3.3 vs -3.7), and landed FEWER top-10% finishes than control's 1.82.
+    # Every SP-budget rule tried so far lifts the mean by narrowing the
+    # distribution, which is backwards when only the best lineup pays. The
+    # field-wide SP-spend signal (r = -0.161 over 10,965 entries) is real, but
+    # it is a mean/ROI signal and does not transfer to a tail objective.
 }
 
 
