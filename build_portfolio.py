@@ -255,27 +255,34 @@ VARIANTS = {
     # +1.70 vs +5.00, top-10 rate back to control's .047 -- and compressed
     # spread (-0.95, p=0.077). The two guardrails interfere rather than
     # compose; the hitter floor is what drags it down. Do not recombine.
-    # ---- spend it, then chase spikes ----
-    # Every arm before this is a CONSTRAINT, and constraints narrow the
-    # distribution. That is the wrong direction when a top-10 finish is what
-    # pays: our best lineup still ends ~23 points short of 10th place on
-    # average (minspend47) against control's ~27, so closing a fifth of the
-    # gap by tightening will not get there. This is the first arm that tries
-    # to WIDEN the right tail instead.
+    # ---- "spend it, then chase spikes" was tried and lost. Do not rebuild ----
+    # spendboom = min_total_salary 47000 + _top3_bs at top=5, built to WIDEN
+    # the right tail rather than trim the left, on the reasoning that
+    # minspend47 frees salary without compressing spread and _top3_bs would
+    # spend it on concentrated upside. Run as a 2x2 so the floor and the score
+    # could be told apart -- 256 builds, 8 slates x 8 seeds:
     #
-    # minspend47 supplies the money (its whole effect came with sd -0.14, i.e.
-    # no compression), and _top3_bs spends it on concentrated upside: it
-    # rewards a few spiky bats rather than eight balanced ones, because
-    # summing all 8 is what averages the spikes away. top=5 samples among the
-    # best five candidates rather than taking argmax, which is what stopped
-    # `ceiling` from collapsing its own spread (sd 20.1 vs control's 40.2 on
-    # 08/25).
+    #     arm                       best   gap to 10th      sd
+    #     control                 123.31         27.06   27.20
+    #     minspend47 (floor)      127.69         22.68   27.05
+    #     boom       (score)      123.58         26.79   25.86
+    #     spendboom  (both)       122.03         28.34   25.19
     #
-    # UNTESTED as of 08/28. boom alone measured +4.58 on best over 5 slates
-    # and only +0.88 over 7, so its tail edge did not replicate; the open
-    # question is whether it does better when it is not also starving the
-    # roster of salary.
-    "spendboom": {"score": _top3_bs, "top": 5, "min_total_salary": 47000},
+    # The floor does all the work. The score adds nothing alone (+0.27 on
+    # best) and SUBTRACTS in combination: spendboom came in 0.96 below control
+    # and ~6 below the floor by itself. Worse, it did the opposite of what it
+    # was for -- sd -2.07 (p=0.043), the only significant result in the run,
+    # and in the wrong direction.
+    #
+    # The reason is structural, and it retires this whole line of attack:
+    # SELECTION COMPRESSES SPREAD. Read the sd column top to bottom -- 27.20
+    # with no scoring, 27.05 with a floor but still no scoring, 25.86 with a
+    # score, 25.19 with a score and a floor. Choosing the best of N candidates
+    # pulls every lineup toward the same preferred players, so the portfolio
+    # converges; top=5 only softens what argmax did to `ceiling`. Control's
+    # "first valid construction" is therefore already the variance-MAXIMISING
+    # configuration. A tail arm cannot be built by scoring harder; it has to
+    # change the pool or the construction rules instead.
     # ---- tested and rejected, do not rebuild ----
     # 08/26: capping the CHEAPER arm instead of the pair (7,000) was tried to
     # fix the hole where a 15,000 pair cap made Jesus Luzardo -- $10,100 and
@@ -928,6 +935,17 @@ class Builder:
         lineups for the spec and keep the best. Same stacks, same caps, same
         constraints -- the only difference is choosing among valid lineups
         instead of taking whichever the RNG produced first.
+
+        Before adding a scored arm: SELECTION COMPRESSES SPREAD, always.
+        Measured over 256 builds, 8 slates x 8 seeds, per-portfolio sd was
+        27.20 with no scoring, 25.86 with a score at top=5, and 25.19 with a
+        score plus a salary floor. Choosing the best of N pulls every lineup
+        toward the same preferred players and the portfolio converges -- the
+        same effect argmax had on `ceiling` (sd 20.1 against control's 40.2 on
+        08/25), just milder. So n_candidates=1 is the variance-MAXIMISING
+        setting, and a score can only help an objective that wants the middle
+        moved, never one that wants a longer right tail. Four arms have now
+        failed that way: ceiling, boom, value_boom, spendboom.
         """
         for spec in specs:
             cands = []
