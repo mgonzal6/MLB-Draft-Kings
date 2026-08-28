@@ -5,3 +5,4 @@ __pycache__/
 run_daily_prep_error.log
 run_daily_prep_error.log
 *.log
+*.log
