@@ -226,6 +226,35 @@ VARIANTS = {
     # once there are more than 5 independent contests; do not ship it as the
     # default on this evidence.
     "hitfloor3000": {"score": None, "top": 1, "hitter_min_salary": 3000},
+    # ---- minimum total spend ----
+    # A guardrail rather than a strategy: 99.5% of the field already clears
+    # 45,000 (only 143 of 29,137 priced lineups sit below), so this trims the
+    # punt builds instead of reshaping the portfolio. It would have rejected
+    # 47 of our 212 entries. Sub-45k lineups took top-10% at 5.59% against the
+    # field's 10.44% and produced no top-1% finish, though 0 of 143 is within
+    # noise at a 1.04% base rate. Note our OWN sub-45k lineups outscored our
+    # dearer ones (85.3 vs 73.8) -- Simpson's paradox, they cluster on
+    # high-scoring slates -- which is why this was swept rather than assumed.
+    #
+    # Swept at 45/46/47k over 256 builds, 8 slates x 8 seeds. All three lifted
+    # the mean (+1.49/+1.56/+1.56, p=0.060/0.049/0.060) and, unlike every
+    # other arm tried, none paid for it in spread (sd -0.19/-0.24/-0.14
+    # against spend15's -3.67). 47k won the tail outright, so it is the one
+    # kept:
+    #
+    #     vs control     best   gap to 10th   hit top-10   sd
+    #     minspend47   +5.00        -5.00     .047 -> .094  -0.14
+    #
+    # i.e. 5 more max points, 5 points closer to the actual 10th-place score,
+    # and double the rate at which any lineup cracked the top 10. Nothing is
+    # significant (best p=0.139; the top-10 rate is 3 events against 6 out of
+    # 64), so this is a directional result, not a proven one.
+    "minspend47": {"score": None, "top": 1, "min_total_salary": 47000},
+    # Tested and dropped: hitter_min_salary 3000 AND min_total_salary 47000
+    # together ("floorspend") scored WORSE than the spend floor alone -- best
+    # +1.70 vs +5.00, top-10 rate back to control's .047 -- and compressed
+    # spread (-0.95, p=0.077). The two guardrails interfere rather than
+    # compose; the hitter floor is what drags it down. Do not recombine.
     # ---- tested and rejected, do not rebuild ----
     # 08/26: capping the CHEAPER arm instead of the pair (7,000) was tried to
     # fix the hole where a 15,000 pair cap made Jesus Luzardo -- $10,100 and
@@ -553,6 +582,7 @@ class Builder:
         # None keeps the historical behaviour; set by a variant or --sp-cap.
         self.sp_salary_cap = None
         self.hitter_min_salary = None
+        self.min_total_salary = None
         self.reject = defaultdict(int)        # why attempts were thrown away
         self.seen_sigs = set()
         self.lineups = []
@@ -844,6 +874,17 @@ class Builder:
             if pick["team"] in self.fades:
                 local_fade[pick["team"]] += 1
 
+        # Minimum spend. Checked last, on the finished lineup, because the
+        # fill loop sorts by bs/salary and only the completed roster tells you
+        # what was actually spent. 99.5% of the field is already above 45,000
+        # (143 of 29,137 priced lineups sit below), so this trims our punt
+        # builds rather than reshaping the portfolio -- it would have rejected
+        # 47 of our 212 entries. Sub-45k lineups took top-10% at 5.59% against
+        # the field's 10.44%, and produced no top-1% finish at all, though at
+        # n=143 that last figure is within noise.
+        if self.min_total_salary and salary < self.min_total_salary:
+            self.reject["under minimum total salary"] += 1
+            return None
         if salary > SALARY_CAP:
             return None
         lu_ = {"SP1": sp1, "SP2": sp2, **placed}
@@ -869,23 +910,40 @@ class Builder:
         """
         for spec in specs:
             cands = []
-            for attempt in range(500):
-                rng = stable_rng(self.seed, spec["stack"], spec["tier"], attempt)
-                res = self.try_build(spec, rng)
-                if not res:
-                    self.reject["no valid construction"] += 1
-                    continue
-                lu_, salary = res
-                s_new = set(self.sig(lu_))
-                if any(len(s_new - set(s0)) < 2 for s0 in self.seen_sigs):
-                    self.reject["too similar to an existing lineup"] += 1
-                    continue
-                floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
-                         + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
-                                      reverse=True)[:5]) * 2.5)
-                cands.append((lu_, salary, floor))
-                if len(cands) >= n_candidates:
+            # A minimum spend that blocks every attempt must bend, or the
+            # portfolio silently shrinks -- the failure the SP cap taught us
+            # to avoid. Bend it in 1,000 steps rather than dropping it: an
+            # all-or-nothing fallback made minspend47 build a 36,600 lineup on
+            # 08/23, below what control managed unconstrained, because the
+            # relaxed pass had no floor at all.
+            base = self.min_total_salary
+            ladder = ([None] if not base
+                      else [base, base - 1000, base - 2000, None])
+            for step, level in enumerate(ladder):
+                if step and cands:
                     break
+                self.min_total_salary = level
+                for attempt in range(500):
+                    rng = stable_rng(self.seed, spec["stack"], spec["tier"],
+                                     attempt)
+                    res = self.try_build(spec, rng)
+                    if not res:
+                        self.reject["no valid construction"] += 1
+                        continue
+                    lu_, salary = res
+                    s_new = set(self.sig(lu_))
+                    if any(len(s_new - set(s0)) < 2 for s0 in self.seen_sigs):
+                        self.reject["too similar to an existing lineup"] += 1
+                        continue
+                    floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
+                             + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
+                                          reverse=True)[:5]) * 2.5)
+                    cands.append((lu_, salary, floor))
+                    if len(cands) >= n_candidates:
+                        break
+                if step and cands:
+                    self.reject["min spend relaxed to %s" % (level or "none")] += 1
+            self.min_total_salary = base
             if not cands:
                 print(f"  !! no unique valid lineup for {spec['stack']} "
                       f"({spec['tier']}) — skipping, never duplicating")
@@ -998,6 +1056,10 @@ def main():
                     help="ceiling,core,contrarian stack sizes (default 5,4,3)")
     ap.add_argument("--max-stacks", type=int, default=MAX_STACKS_PER_TEAM,
                     help=f"primary stacks per team (default {MAX_STACKS_PER_TEAM})")
+    ap.add_argument("--min-total-salary", type=int, default=None,
+                    help="reject lineups spending less than this in total "
+                         "(e.g. 45000). Overrides the variant's own; "
+                         "0 disables. Bends on a slate that cannot meet it")
     ap.add_argument("--hitter-min-salary", type=int, default=None,
                     help="floor the salary of every NON-STACK hitter (e.g. "
                          "3000). Overrides the variant's own; 0 disables")
@@ -1081,6 +1143,11 @@ def main():
     hfloor = (cfg.get("hitter_min_salary") if args.hitter_min_salary is None
               else (args.hitter_min_salary or None))
     b.hitter_min_salary = hfloor
+    mspend = (cfg.get("min_total_salary") if args.min_total_salary is None
+              else (args.min_total_salary or None))
+    b.min_total_salary = mspend
+    if mspend:
+        print(f"\nminimum total salary {mspend:,}")
     if hfloor:
         print(f"\nnon-stack hitters floored at {hfloor:,}")
     if cap:
