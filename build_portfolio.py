@@ -322,6 +322,21 @@ VARIANTS = {
     #
     # fill_max_bo and --fill-max-bo remain wired for future work; no variant
     # sets them.
+    # ---- maximum correlation: one game, all in ----
+    # Not a coverage arm. Our portfolio is built to spread -- 40 lineups
+    # sharing only 1.1-1.8 players, max stack 4.03 -- which is right for
+    # cashing and wrong for winning. Reaching the 99.97th percentile of a
+    # 3,500-entry field needs a lineup whose players succeed or fail TOGETHER.
+    #
+    # So: every stack is 5, and the bring-back is always taken, making each
+    # lineup a bet on one game exploding. Three of the nine winning lineups on
+    # record were 5-stacks. Expect a lower mean and a fatter right tail; the
+    # mean is not the point.
+    "maxcorr": {"score": None, "top": 1, "stack_sizes": (5, 5, 5),
+                "force_bringback": True},
+    "maxcorr47": {"score": None, "top": 1, "stack_sizes": (5, 5, 5),
+                  "force_bringback": True, "min_total_salary": 47000,
+                  "ignore_vegas_adj": True},
     # ---- rank pitchers on raw blended, not the Vegas-adjusted number ----
     # See build_sp_pool for the measurement. This is not a portfolio rule; it
     # changes which pitchers the builder believes are good, so it should move
@@ -705,6 +720,7 @@ class Builder:
         self.min_total_salary = None
         self.hitter_min_avg26 = None
         self.fill_max_bo = None
+        self.force_bringback = False
         self.reject = defaultdict(int)        # why attempts were thrown away
         self.seen_sigs = set()
         self.lineups = []
@@ -902,9 +918,12 @@ class Builder:
 
     def try_build(self, spec, rng):
         stack_t = spec["stack"]
+        # max-correlation arms always take the bring-back: the point is to
+        # bet the whole GAME, not just one side of it.
         spec["bringback"] = bool(
-            stack_t in self.vegas.index
-            and self.vegas.loc[stack_t, "game_total"] >= BRINGBACK_TOTAL)
+            self.force_bringback
+            or (stack_t in self.vegas.index
+                and self.vegas.loc[stack_t, "game_total"] >= BRINGBACK_TOTAL))
         pairs = self.pick_sp_pair(spec, rng)
         if not pairs:
             return None
@@ -1268,6 +1287,10 @@ def main():
         print(f"  {t}: {n}  (implied {impl.get(t, float('nan')):.2f})")
 
     sizes = tuple(int(x) for x in args.stack_sizes.split(","))
+    _vcfg = VARIANTS.get(args.variant, {}) if args.variant else {}
+    if _vcfg.get("stack_sizes"):
+        sizes = _vcfg["stack_sizes"]
+        print("max-correlation: stack sizes %s" % (sizes,))
     if len(sizes) != 3:
         sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
     specs = make_specs(alloc, n_gpp, sizes=sizes)
@@ -1303,6 +1326,9 @@ def main():
     fbo = (cfg.get("fill_max_bo") if args.fill_max_bo is None
            else (args.fill_max_bo or None))
     b.fill_max_bo = fbo
+    if cfg.get("force_bringback"):
+        b.force_bringback = True
+        print("max-correlation: bring-back forced on every lineup")
     if fbo:
         print("fill hitters must bat %d or better" % fbo)
     if havg:
