@@ -250,6 +250,53 @@ VARIANTS = {
     # significant (best p=0.139; the top-10 rate is 3 events against 6 out of
     # 64), so this is a directional result, not a proven one.
     "minspend47": {"score": None, "top": 1, "min_total_salary": 47000},
+    # ---- cut the hitters who bust more often than they produce ----
+    # Criterion, stated by the user and measured directly from per-game
+    # history: drop anyone whose P(DK == 0) exceeds P(DK >= 10). Over 1,219
+    # player-slates with 20+ prior games, 41.9% of the pool meets it, and they
+    # are exactly what you would expect -- P(0) .333 vs .196, P(>=10) .192 vs
+    # .313, real mean 5.29 vs 7.61 points.
+    #
+    # avg26 is a near-perfect build-time proxy for it: corr -0.769, and the
+    # bottom decile is 100% busts against 0% in the top. Crucially the cut is
+    # CLEAN -- at every threshold up to avg26 < 5.0, 100% of the players
+    # removed are true busts, so there are no false positives to trade off:
+    #
+    #     avg26 < 3.5  removes  4.2% of pool, 100% of them true busts
+    #     avg26 < 4.0  removes  6.8%          100%
+    #     avg26 < 4.5  removes 11.9%          100%
+    #
+    # Fills only, same reason as the salary floor: a stack is a contiguous
+    # batting-order run and cannot be filtered without breaking the
+    # correlation it exists for. So a bust batting 6th in a 5-stack still gets
+    # rostered; this only stops us reaching for one to fill a spare slot.
+    # Swept at 3.5/4.0/4.5 over 320 builds, 8 slates x 8 seeds. 3.5 won:
+    #
+    #     vs control          best   hit top-10      sd
+    #     spend47nobust35   +7.709   .047 -> .156  +0.244
+    #     spend47nobust40   +5.541   .047 -> .125  -0.227
+    #     spend47nobust45   +5.878   .047 -> .109  -0.177
+    #
+    # hit10 at 3.5 is p=0.038, and it is the only arm all project to INCREASE
+    # spread rather than compress it -- the profile a top-10 objective needs.
+    #
+    # Treat it with suspicion anyway, for four reasons. (1) That run tested 24
+    # hypotheses, so one p<0.05 is what chance alone produces. (2) The
+    # dose-response is not monotone: 3.5 > 4.5 > 4.0. (3) On 08/28, the first
+    # live slate where it could be checked, lineups CONTAINING the busts
+    # scored 101.6 against 82.0 for those without, and more busts meant better
+    # scores. (4) This backtest methodology has now lost live four times
+    # running -- spend15 read +10.60 (p=0.056) and delivered -7.17.
+    #
+    # Why it is nonetheless coherent: avg26 predicts realised FPTS at r=+0.104
+    # against salary's +0.111, i.e. it is real information but adds nothing on
+    # top of price. So this cut is "drop the cheapest, worst players", the same
+    # family as minspend47 -- it removes bad lineups rather than selecting good
+    # ones. That is the pattern for the whole project: every arm that helped
+    # removed the bottom, every arm that tried to pick winners leaned on bs and
+    # failed. Unshipped until it survives slates it was not scored against.
+    "spend47nobust35": {"score": None, "top": 1, "min_total_salary": 47000,
+                        "hitter_min_avg26": 3.5},
     # Tested and dropped: hitter_min_salary 3000 AND min_total_salary 47000
     # together ("floorspend") scored WORSE than the spend floor alone -- best
     # +1.70 vs +5.00, top-10 rate back to control's .047 -- and compressed
@@ -611,6 +658,7 @@ class Builder:
         self.sp_salary_cap = None
         self.hitter_min_salary = None
         self.min_total_salary = None
+        self.hitter_min_avg26 = None
         self.reject = defaultdict(int)        # why attempts were thrown away
         self.seen_sigs = set()
         self.lineups = []
@@ -875,6 +923,7 @@ class Builder:
                         if slot in h["slots"] and h["name"] not in used
                         and h["team"] not in banned and tcount[h["team"]] < 5
                         and h["salary"] <= budget and h["salary"] >= min_sal
+                        and h["avg26"] >= (self.hitter_min_avg26 or 0)
                         and (h["team"] == stack_t                   # Fix #15
                              or self.fill_appear[h["name"]] < fill_cap)
                         and not (h["team"] in self.fades
@@ -1095,6 +1144,10 @@ def main():
                     help="ceiling,core,contrarian stack sizes (default 5,4,3)")
     ap.add_argument("--max-stacks", type=int, default=MAX_STACKS_PER_TEAM,
                     help=f"primary stacks per team (default {MAX_STACKS_PER_TEAM})")
+    ap.add_argument("--hitter-min-avg26", type=float, default=None,
+                    help="drop fill hitters below this DK points-per-game "
+                         "average (e.g. 4.0), i.e. the players more likely to "
+                         "score 0 than 10. Overrides the variant's; 0 disables")
     ap.add_argument("--min-total-salary", type=int, default=None,
                     help="reject lineups spending less than this in total "
                          "(e.g. 45000). Overrides the variant's own; "
@@ -1185,6 +1238,11 @@ def main():
     mspend = (cfg.get("min_total_salary") if args.min_total_salary is None
               else (args.min_total_salary or None))
     b.min_total_salary = mspend
+    havg = (cfg.get("hitter_min_avg26") if args.hitter_min_avg26 is None
+            else (args.hitter_min_avg26 or None))
+    b.hitter_min_avg26 = havg
+    if havg:
+        print(f"\nfill hitters need avg26 >= {havg}")
     if mspend:
         print(f"\nminimum total salary {mspend:,}")
     if hfloor:
