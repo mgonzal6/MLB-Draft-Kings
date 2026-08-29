@@ -297,6 +297,38 @@ VARIANTS = {
     # failed. Unshipped until it survives slates it was not scored against.
     "spend47nobust35": {"score": None, "top": 1, "min_total_salary": 47000,
                         "hitter_min_avg26": 3.5},
+    # ---- batting order on fill hitters: TESTED AND REJECTED ----
+    # The fill loop sorts on bs/salary with no batting-order term, so a number
+    # 9 hitter competes with a leadoff man while getting roughly one fewer
+    # plate appearance. Over 1,230 hitter-slates, P(FPTS < 5) runs 34.6%
+    # batting 1st to 66.2% batting 9th, mean points 8.87 down to 4.68, and a
+    # bo <= 6 filter moves pool-wide P(<5) from 50.2% to 45.7% -- about five
+    # times what the avg26 >= 3.5 cut manages (49.4%).
+    #
+    # It did not translate. 320 builds, 9 slates x 8 seeds, paired vs control:
+    #
+    #     arm                best   hit top-10      sd
+    #     minspend47       +4.300        0.083   -0.281
+    #     spend47nobust35  +6.122        0.139   -0.009
+    #     spend47bo6       +3.402        0.111   -0.604
+    #     spend47bo7       +4.678        0.097   -0.269
+    #
+    # bo6 finished BELOW minspend47 alone. Reducing the bust rate is not the
+    # same as improving the tail: the 7-9 spots are where the cheap volatile
+    # bats live, and those are what spike. sd tells the story -- bo6 -0.604
+    # against nobust35's -0.009, and the arm that kept its spread won. It also
+    # costs portfolio size (17 lineups against 19 on 08/24), which is a bad
+    # trade when a single lineup has to reach the top 10.
+    #
+    # fill_max_bo and --fill-max-bo remain wired for future work; no variant
+    # sets them.
+    # ---- rank pitchers on raw blended, not the Vegas-adjusted number ----
+    # See build_sp_pool for the measurement. This is not a portfolio rule; it
+    # changes which pitchers the builder believes are good, so it should move
+    # more than any construction arm has.
+    "novegas": {"score": None, "top": 1, "ignore_vegas_adj": True},
+    "spend47novegas": {"score": None, "top": 1, "min_total_salary": 47000,
+                       "ignore_vegas_adj": True},
     # Tested and dropped: hitter_min_salary 3000 AND min_total_salary 47000
     # together ("floorspend") scored WORSE than the spend floor alone -- best
     # +1.70 vs +5.00, top-10 rate back to control's .047 -- and compressed
@@ -423,7 +455,8 @@ def load_data(export_dir):
     return dk, lu, vegas, padj, hcache, opp_map, game_map, slate_date
 
 
-def build_sp_pool(dk, lu, padj, opp_map, n_lineups):
+def build_sp_pool(dk, lu, padj, opp_map, n_lineups,
+                  ignore_vegas_adj=False):
     rows = []
     for _, r in lu[(lu["bo"] == "SP") & (lu["conf"] == "Y")].iterrows():
         cand = dk[(dk["nname"] == r["nname"]) & (dk["Roster Position"] == "P")]
@@ -438,7 +471,19 @@ def build_sp_pool(dk, lu, padj, opp_map, n_lineups):
         a = a.iloc[0]
         rows.append({"name": d["Name"], "id": d["Name + ID"], "team": d["TeamAbbrev"],
                      "opp": opp_map[d["TeamAbbrev"]], "salary": int(d["Salary"]),
-                     "adj_bs": a["adj_bs"], "adj_blended": a["adj_blended"],
+                     # Measured 08/28: the Vegas adjustment makes pitcher
+                     # ranking WORSE on all nine stored slates. Paired on the
+                     # same slate, blended -> adj_blended costs -0.179
+                     # Spearman (t=-3.57, p=0.0073), taking +0.188 down to
+                     # +0.009, and vegas_adj itself correlates -0.190 with the
+                     # residual blended could not explain -- i.e. the arms it
+                     # marks down outperform. Setting this flag ranks on the
+                     # raw numbers instead, everywhere at once: the median
+                     # split, the cap tiers, the pair sort and the anchor all
+                     # read these two fields.
+                     "adj_bs": a["bs"] if ignore_vegas_adj else a["adj_bs"],
+                     "adj_blended": (a["blended"] if ignore_vegas_adj
+                                     else a["adj_blended"]),
                      "blended": a["blended"]})
     sp_df = pd.DataFrame(rows)
     if sp_df.empty:
@@ -659,6 +704,7 @@ class Builder:
         self.hitter_min_salary = None
         self.min_total_salary = None
         self.hitter_min_avg26 = None
+        self.fill_max_bo = None
         self.reject = defaultdict(int)        # why attempts were thrown away
         self.seen_sigs = set()
         self.lineups = []
@@ -924,6 +970,7 @@ class Builder:
                         and h["team"] not in banned and tcount[h["team"]] < 5
                         and h["salary"] <= budget and h["salary"] >= min_sal
                         and h["avg26"] >= (self.hitter_min_avg26 or 0)
+                        and h["bo"] <= (self.fill_max_bo or 9)
                         and (h["team"] == stack_t                   # Fix #15
                              or self.fill_appear[h["name"]] < fill_cap)
                         and not (h["team"] in self.fades
@@ -1144,6 +1191,12 @@ def main():
                     help="ceiling,core,contrarian stack sizes (default 5,4,3)")
     ap.add_argument("--max-stacks", type=int, default=MAX_STACKS_PER_TEAM,
                     help=f"primary stacks per team (default {MAX_STACKS_PER_TEAM})")
+    ap.add_argument("--fill-max-bo", type=int, default=None,
+                    help="fill hitters must bat this high or better (e.g. 6). "
+                         "Overrides the variant's own; 0 disables")
+    ap.add_argument("--ignore-vegas-adj", action="store_true",
+                    help="rank SPs on raw blended/bs instead of the "
+                         "Vegas-adjusted adj_blended/adj_bs")
     ap.add_argument("--hitter-min-avg26", type=float, default=None,
                     help="drop fill hitters below this DK points-per-game "
                          "average (e.g. 4.0), i.e. the players more likely to "
@@ -1183,14 +1236,20 @@ def main():
             print(f"  {n_games} games: full GPP build, no cash lineups "
                   f"(Fix #20 — pass --cash N to build them anyway)")
 
-    sp_df, caps, med, feasible = build_sp_pool(dk, lu, padj, opp_map, args.lineups)
+    _cfg0 = VARIANTS.get(args.variant, {}) if args.variant else {}
+    no_vegas = bool(args.ignore_vegas_adj or _cfg0.get("ignore_vegas_adj"))
+    sp_df, caps, med, feasible = build_sp_pool(dk, lu, padj, opp_map,
+                                               args.lineups, no_vegas)
+    if no_vegas:
+        print("ranking SPs on RAW blended/bs (vegas_adj ignored)")
     if feasible < args.lineups:
         # Recompute the caps against the reduced count once so the ceiling is
         # honest for the portfolio we actually build. One pass only — a very
         # thin arm pool would otherwise ratchet the count down to nothing.
         args.lineups = max(1, feasible)
         args.cash = min(args.cash, args.lineups)
-        sp_df, caps, med, _ = build_sp_pool(dk, lu, padj, opp_map, args.lineups)
+        sp_df, caps, med, _ = build_sp_pool(dk, lu, padj, opp_map,
+                                            args.lineups, no_vegas)
     print(f"\nSP pool ({len(sp_df)}), tiered by vegas-adj blended (median {med:.2f}):")
     print(sp_df[["name", "team", "opp", "salary", "adj_bs", "adj_blended", "cap"]]
           .to_string(index=False))
@@ -1241,6 +1300,11 @@ def main():
     havg = (cfg.get("hitter_min_avg26") if args.hitter_min_avg26 is None
             else (args.hitter_min_avg26 or None))
     b.hitter_min_avg26 = havg
+    fbo = (cfg.get("fill_max_bo") if args.fill_max_bo is None
+           else (args.fill_max_bo or None))
+    b.fill_max_bo = fbo
+    if fbo:
+        print("fill hitters must bat %d or better" % fbo)
     if havg:
         print(f"\nfill hitters need avg26 >= {havg}")
     if mspend:
