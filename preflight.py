@@ -172,6 +172,15 @@ def main():
         else:
             print(f"  first pitch: {when}  (*** ALREADY STARTED ***)")
 
+    if n_sp and not n_sp_conf and slate_io.allow_unconfirmed():
+        print()
+        print("  NOTE: no SP is confirmed yet, but DK_ALLOW_UNCONFIRMED is set,")
+        print("        so the build will use PROJECTED batting orders. Those are")
+        print("        guesses; a scratched player scores zero. Rebuild once")
+        print("        lineups post if there is still time.")
+        print("-" * 60)
+        return 0
+
     if n_sp and not n_sp_conf:
         print()
         print("  *** STOPPING: no SP is confirmed=Y yet. The lineups file was")
@@ -179,6 +188,8 @@ def main():
         print("      the portfolio build cannot complete.")
         print("      Re-download the Lineups CSV closer to lock and rerun.")
         print("      Nothing was spent -- no odds API call was made.")
+        print("      To build anyway on projected orders, set")
+        print("      DK_ALLOW_UNCONFIRMED=1 and rerun.")
         print("-" * 60)
         return 1
 

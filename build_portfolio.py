@@ -92,6 +92,8 @@ from datetime import datetime
 
 import pandas as pd
 
+import slate_io
+
 from lineup_id import lineup_id
 
 EXPORT_DIR = r"G:\My Drive\DK\export"
@@ -473,7 +475,10 @@ def load_data(export_dir):
 def build_sp_pool(dk, lu, padj, opp_map, n_lineups,
                   ignore_vegas_adj=False):
     rows = []
-    for _, r in lu[(lu["bo"] == "SP") & (lu["conf"] == "Y")].iterrows():
+    sp_rows = lu[(lu["bo"] == "SP") & slate_io.confirmed_mask(lu["conf"])]
+    slate_io.unconfirmed_banner(int((sp_rows["conf"] != "Y").sum()),
+                                "STARTING PITCHERS")
+    for _, r in sp_rows.iterrows():
         cand = dk[(dk["nname"] == r["nname"]) & (dk["Roster Position"] == "P")]
         if cand.empty:
             print(f"  WARN SP not in DK slate file: {r['player name']}")
@@ -505,7 +510,8 @@ def build_sp_pool(dk, lu, padj, opp_map, n_lineups,
         # "Pulled too early" and "name-match bug" look identical here but need
         # opposite responses, so say which one it is.
         n_sp = int((lu["bo"] == "SP").sum())
-        n_conf = int(((lu["bo"] == "SP") & (lu["conf"] == "Y")).sum())
+        n_conf = int(((lu["bo"] == "SP")
+                      & slate_io.confirmed_mask(lu["conf"])).sum())
         if n_sp and not n_conf:
             sys.exit(f"ERROR: {n_sp} SPs listed but NONE confirmed=Y — the "
                      f"lineups file was pulled too early. Re-download closer "
@@ -561,7 +567,10 @@ def build_sp_pool(dk, lu, padj, opp_map, n_lineups,
 
 def build_hitter_pool(dk, lu, hcache, opp_map):
     pool = []
-    for _, r in lu[lu["conf"] == "Y"].iterrows():
+    hit_rows = lu[slate_io.confirmed_mask(lu["conf"])]
+    slate_io.unconfirmed_banner(int((hit_rows["conf"] != "Y").sum()),
+                                "HITTERS")
+    for _, r in hit_rows.iterrows():
         bo = pd.to_numeric(r["batting order"], errors="coerce")
         if not (1 <= (bo or 0) <= 9):
             continue
@@ -1210,6 +1219,8 @@ def main():
                     help="ceiling,core,contrarian stack sizes (default 5,4,3)")
     ap.add_argument("--max-stacks", type=int, default=MAX_STACKS_PER_TEAM,
                     help=f"primary stacks per team (default {MAX_STACKS_PER_TEAM})")
+    ap.add_argument("--allow-unconfirmed", action="store_true",
+                    help="accept confirmed=N rows from the lineups feed. For a late slate whose later games have not posted; batting orders are then projections, not posted lineups")
     ap.add_argument("--fill-max-bo", type=int, default=None,
                     help="fill hitters must bat this high or better (e.g. 6). "
                          "Overrides the variant's own; 0 disables")
@@ -1234,6 +1245,8 @@ def main():
     ap.add_argument("--no-snapshot", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
+    if getattr(args, "allow_unconfirmed", False):
+        slate_io.set_allow_unconfirmed(True)
     if args.selftest:
         selftest()
         return

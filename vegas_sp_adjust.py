@@ -37,6 +37,8 @@ import os
 import sys
 import pandas as pd
 
+import slate_io
+
 # ---------------------------------------------------------------------------
 # Folder convention (matches filtered_DK_Salaries.py). Falls back to the
 # current directory if the G: drive isn't present (e.g. running elsewhere).
@@ -269,7 +271,9 @@ def build_sp_adjust(pit_df, lineups_df, vegas_df):
     lu.columns = lu.columns.str.strip()
     lu["bo"] = lu["batting order"].astype(str).str.strip().str.upper()
     lu["conf"] = lu["confirmed"].astype(str).str.strip().str.upper()
-    sps = lu[(lu["bo"] == "SP") & (lu["conf"] == "Y")].copy()
+    sps = lu[(lu["bo"] == "SP") & slate_io.confirmed_mask(lu["conf"])].copy()
+    slate_io.unconfirmed_banner(int((sps["conf"] != "Y").sum()),
+                                "STARTING PITCHERS")
     sps["team"] = sps["team code"].astype(str).str.strip().replace(ABBR_REMAP)
 
     if vegas_df.empty or "team" not in vegas_df.columns:
@@ -351,7 +355,11 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser(description="Derive implied totals + Vegas-adjusted SP table.")
     ap.add_argument("--selftest", action="store_true", help="run math checks only, write nothing")
+    ap.add_argument("--allow-unconfirmed", action="store_true",
+                    help="accept confirmed=N SPs from the lineups feed")
     args = ap.parse_args()
+    if getattr(args, "allow_unconfirmed", False):
+        slate_io.set_allow_unconfirmed(True)
 
     if args.selftest:
         selftest()

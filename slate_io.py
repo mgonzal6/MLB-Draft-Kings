@@ -55,3 +55,50 @@ def find_inputs(folder=LOAD):
         elif "dksalaries" in low:
             salaries = os.path.join(folder, fn)
     return lineups, salaries
+
+
+# ── unconfirmed lineups ──────────────────────────────────────────────────────
+# The feed marks each row confirmed Y or N. Every script normally accepts only
+# Y, which is the right default: an unconfirmed batting order is a projection,
+# and a player who ends up scratched scores zero. But on a late slate the
+# lineups for the later games have not posted by lock, and refusing to build
+# at all is worse than building on the projected order.
+#
+# Opt in with DK_ALLOW_UNCONFIRMED=1, or --allow-unconfirmed where a script
+# takes arguments. One switch honoured everywhere, so the SP pool, the Vegas
+# adjustment, the hitter pool and the upload validator can never disagree
+# about which rows are usable -- the same reason read_table lives here.
+ALLOW_ENV = "DK_ALLOW_UNCONFIRMED"
+
+
+def allow_unconfirmed():
+    """True when confirmed=N rows should be treated as usable."""
+    return os.environ.get(ALLOW_ENV, "").strip().lower() in ("1", "true", "yes", "y")
+
+
+def set_allow_unconfirmed(on=True):
+    """Set the switch for this process and anything it spawns."""
+    os.environ[ALLOW_ENV] = "1" if on else ""
+
+
+def confirmed_mask(conf, allow=None):
+    """Rows to accept, from the lineups feed's confirmed column.
+
+    Y is always accepted; N only when the switch is on. Anything else (blank,
+    junk) is never accepted, so a malformed feed cannot quietly widen the pool.
+    """
+    if allow is None:
+        allow = allow_unconfirmed()
+    c = conf.astype(str).str.strip().str.upper()
+    return c.isin(("Y", "N")) if allow else (c == "Y")
+
+
+def unconfirmed_banner(n_unconf, what):
+    """Loud, uniform warning. Silent when nothing unconfirmed was used."""
+    if not n_unconf:
+        return
+    print("*" * 68)
+    print("*** USING %d UNCONFIRMED %s (confirmed=N)." % (n_unconf, what))
+    print("*** Batting orders are projections, not posted lineups, and a")
+    print("*** scratched player scores zero. Rebuild once lineups post.")
+    print("*" * 68)

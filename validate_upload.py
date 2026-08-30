@@ -14,6 +14,8 @@ import sys
 
 import pandas as pd
 
+import slate_io
+
 EXPORT = r"G:\My Drive\DK\export"
 SLOTS = ["P", "P", "C", "1B", "2B", "3B", "SS", "OF", "OF", "OF"]
 CAP = 50000
@@ -57,8 +59,9 @@ def norm(s):
 lu["n"] = lu["player name"].map(norm)
 lu["bo"] = lu["batting order"].astype(str).str.strip().str.upper()
 lu["cf"] = lu["confirmed"].astype(str).str.strip().str.upper()
-conf_bat = set(lu[(lu["cf"] == "Y") & lu["bo"].str.fullmatch(r"[1-9]")]["n"])
-conf_sp = set(lu[(lu["cf"] == "Y") & (lu["bo"] == "SP")]["n"])
+_ok = slate_io.confirmed_mask(lu["cf"])
+conf_bat = set(lu[_ok & lu["bo"].str.fullmatch(r"[1-9]")]["n"])
+conf_sp = set(lu[_ok & (lu["bo"] == "SP")]["n"])
 bo_of = dict(zip(lu["n"], lu["bo"]))
 
 all_ok = True
