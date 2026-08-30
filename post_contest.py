@@ -37,37 +37,14 @@ EXPORT_DIR = r"G:\My Drive\DK\export"
 SNAPSHOT_DIR = r"G:\My Drive\DK\Snapshots"
 POS_TOKENS = {"P", "C", "1B", "2B", "3B", "SS", "OF"}
 
-# Payout curves, keyed by field size. ROI is reported ONLY when the contest's
-# field matches one of these exactly — a different contest has a different
-# curve, and printing dollars from the wrong table is worse than printing none.
-# Add a structure by pasting its placement/payout rows from DK.
-PAYOUT_TABLES = {
-    # $0.10 GPP, $300 pool
-    3567: {"fee": 0.10,
-           "payouts": [(1, 1, 30.00), (2, 2, 15.00), (3, 3, 10.00), (4, 4, 5.00),
-                       (5, 5, 4.00), (6, 7, 3.00), (8, 10, 2.00), (11, 15, 1.50),
-                       (16, 20, 1.00), (21, 30, 0.75), (31, 60, 0.50),
-                       (61, 130, 0.40), (131, 340, 0.30), (341, 830, 0.20)]},
-    # $0.10 GPP, $100 pool, 277 paying spots
-    1189: {"fee": 0.10,
-           "payouts": [(1, 1, 10.00), (2, 2, 6.00), (3, 3, 4.00), (4, 4, 3.00),
-                       (5, 5, 2.00), (6, 6, 1.50), (7, 8, 1.00), (9, 12, 0.75),
-                       (13, 22, 0.50), (23, 52, 0.40), (53, 117, 0.30),
-                       (118, 277, 0.20)]},
-}
-
-
-def pos_payout(p, payouts):
-    for lo, hi, amt in payouts:
-        if lo <= p <= hi:
-            return amt
-    return 0.0
-
-
-def entry_payout(rank, tie_size, payouts):
-    """DK splits the payouts of the occupied positions across tied entries."""
-    return sum(pos_payout(p, payouts)
-               for p in range(rank, rank + tie_size)) / tie_size
+# There is deliberately no payout table here and no ROI line in the report.
+# The objective is a top-10 FINISH -- the best single lineup, whichever contest
+# it happened to be entered in. Dollars measure the contest, not the build: the
+# same lineup pays differently in two fields on the same slate, and the
+# min-cash tail rewards the mid-pack entries the portfolio is not built for.
+# What gets tracked is where lineups LANDED: best rank, and the distance from
+# that slate's 10th-place score. TOP_N is that bar.
+TOP_N = 10
 
 
 # ---------------------------------------------------------------- parsing
@@ -255,41 +232,37 @@ def main():
     lineup_keys = mine["players"].map(lambda lu: tuple(sorted(n for _, n in lu)))
     dup_groups = lineup_keys.map(Counter(lineup_keys))
     mine["pctile"] = mine["Rank"] / n_field * 100
-    tie_sizes = standings.groupby("Rank")["EntryId"].count()
-    table = PAYOUT_TABLES.get(n_field)
-    roi_ok = table is not None
-    rows, total_won = [], 0.0
+    rows = []
     for (_, r), dups in zip(mine.iterrows(), dup_groups):
         names = [n for _, n in r["players"]]
         sal = int(salaries["Salary"].reindex(names).sum()) if salaries is not None else None
-        won = (entry_payout(int(r["Rank"]), int(tie_sizes[r["Rank"]]),
-                            table["payouts"]) if roi_ok else 0.0)
-        total_won += won
         flag = f"  DUPE x{dups}" if dups > 1 else ""
         sal_s = f"  ${sal}" if sal and sal > 0 else ""
-        won_s = f"  won ${won:.2f}" if won else ""
         print(f"  rank {int(r['Rank']):>5} (top {r['pctile']:4.1f}%)  "
-              f"{r['Points']:6.2f} pts{sal_s}{won_s}{flag}")
+              f"{r['Points']:6.2f} pts{sal_s}{flag}")
         # lineup_id joins these results back to portfolio_summary_<date>.csv,
         # so "did my highest-ranked lineups score best?" becomes answerable.
         rows.append({"Rank": int(r["Rank"]), "Pctile": round(r["pctile"], 1),
                      "lineup_id": lineup_id(names),
-                     "Points": r["Points"], "Salary": sal, "Won": round(won, 2),
+                     "Points": r["Points"], "Salary": sal,
                      "DupCount": dups, "Lineup": r["Lineup"]})
     n_dupes = int((dup_groups > 1).sum())
     if n_dupes:
         print(f"\n  WARNING: {n_dupes} entries are duplicates of another of my own "
               f"lineups -- wasted entry diversity.")
 
-    if roi_ok:
-        cost = len(mine) * table["fee"]
-        net = total_won - cost
-        print(f"\n  ROI: won ${total_won:.2f} on ${cost:.2f} in entries -> "
-              f"net ${net:+.2f} ({net / cost * 100:+.0f}%)")
-    else:
-        known = ", ".join(str(k) for k in sorted(PAYOUT_TABLES))
-        print(f"\n  (ROI skipped: no payout table for a {n_field}-entry "
-              f"contest; have {known} — add one to PAYOUT_TABLES to enable)")
+    # ---- where the lineups landed. One number matters most: how far the BEST
+    # lineup finished from the bar, because one lineup reaching the top handful
+    # is the whole objective and the other nineteen are not consolation.
+    by_rank = standings.sort_values("Rank")
+    bar = by_rank[by_rank["Rank"] <= TOP_N]["Points"].min()
+    best = mine.loc[mine["Rank"].idxmin()]
+    gap = float(best["Points"]) - float(bar)
+    n_top = int((mine["Rank"] <= TOP_N).sum())
+    print(f"\n  best lineup   : rank {int(best['Rank'])} of {n_field} "
+          f"(top {best['pctile']:.1f}%), {best['Points']:.2f} pts")
+    print(f"  {TOP_N}th place    : {bar:.2f}  ->  gap {gap:+.2f}")
+    print(f"  in the top {TOP_N} : {n_top} of {len(mine)}")
 
     # ---- my exposure vs field
     my_counts = exposure_counts(mine["players"])

@@ -34,6 +34,7 @@ Design notes:
 
 import argparse
 import os
+import re
 import sys
 import pandas as pd
 
@@ -251,14 +252,25 @@ def vegas_adj(game_total, opp_implied):
     return adj
 
 
+# Same rules as build_portfolio.norm and validate_upload.norm. This one joins
+# the BS cache to the lineups feed, and the two spell names differently: the
+# cache carries "Matthew Liberatore" while the feed says "Matt". Without the
+# nickname map he matched nothing, dropped out of pitcher_bs_cache_adj.csv,
+# and then surfaced downstream as build_portfolio's misleading "SP has no
+# cache/vegas row" -- a confirmed starter silently absent from the SP pool.
+NICKS = {"michael": "mike", "leonardo": "leo", "matthew": "matt",
+         "christopher": "chris", "enrique": "kike"}
+
+
 def normalize_name(s):
     s = str(s).lower()
+    s = re.sub(r"\([^)]*\)", " ", s)
     for ch in ".,'-":
         s = s.replace(ch, "")
     for suf in (" jr", " sr", " ii", " iii", " iv"):
         if s.endswith(suf):
             s = s[: -len(suf)]
-    return " ".join(s.split())
+    return " ".join(NICKS.get(t, t) for t in s.split() if len(t) > 1)
 
 
 def build_sp_adjust(pit_df, lineups_df, vegas_df):

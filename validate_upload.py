@@ -47,14 +47,24 @@ for gi in dk["Game Info"].dropna().unique():
         game[a] = game[h] = f"{a}@{h}"
 
 # confirmed starters straight from the lineups file
+# Duplicated from build_portfolio.py on purpose -- this validator re-derives
+# every rule rather than importing them, so a builder bug cannot hide here.
+# Keep the two in sync when either changes.
+NICKS = {"michael": "mike", "leonardo": "leo", "matthew": "matt",
+         "christopher": "chris", "enrique": "kike"}
+
+
 def norm(s):
     s = str(s).lower()
+    # "Shohei (H) Ohtani" -- the lineups feed tags a two-way player's role and
+    # DK does not. Strip parenthesised groups (DK's "(12345)" id too).
+    s = re.sub(r"\([^)]*\)", " ", s)
     for ch in ".,'-":
         s = s.replace(ch, "")
     for suf in (" jr", " sr", " ii", " iii", " iv"):
         if s.endswith(suf):
             s = s[: -len(suf)]
-    return " ".join(t for t in s.split() if len(t) > 1)
+    return " ".join(NICKS.get(t, t) for t in s.split() if len(t) > 1)
 
 lu["n"] = lu["player name"].map(norm)
 lu["bo"] = lu["batting order"].astype(str).str.strip().str.upper()

@@ -102,7 +102,11 @@ ABBR_REMAP = {"OAK": "ATH", "WAS": "WSH", "CHW": "CWS"}
 SALARY_CAP = 50000
 HITTER_SLOTS = ["C", "1B", "2B", "3B", "SS", "OF1", "OF2", "OF3"]
 ALL_SLOTS = ["SP1", "SP2"] + HITTER_SLOTS
-NICKS = {"michael": "mike", "leonardo": "leo", "matthew": "matt", "christopher": "chris"}
+# Lineups-feed spelling -> DK spelling. Applied to BOTH sides, so an entry can
+# only do harm if two DIFFERENT players on one slate collapse onto the same
+# name, which no pair here does.
+NICKS = {"michael": "mike", "leonardo": "leo", "matthew": "matt",
+         "christopher": "chris", "enrique": "kike"}
 
 # Exposure knobs (fractions of the portfolio)
 ANCHOR_CAP, SOLID_CAP, FLIER_CAP = 0.40, 0.30, 0.15
@@ -404,6 +408,13 @@ VARIANTS = {
 
 def norm(s):
     s = str(s).lower()
+    # The lineups feed marks a two-way player's role inside the name --
+    # "Shohei (H) Ohtani" is his hitter row, "(P)" would be the pitcher one --
+    # and DK carries no such marker. "(h)" survives the middle-initial filter
+    # because it is three characters long, so the name never matched and the
+    # best bat on the slate was silently dropped from the pool. Strip any
+    # parenthesised group first; this also removes DK's "(12345)" id suffix.
+    s = re.sub(r"\([^)]*\)", " ", s)
     for ch in ".,'-":
         s = s.replace(ch, "")
     for suf in (" jr", " sr", " ii", " iii", " iv"):
