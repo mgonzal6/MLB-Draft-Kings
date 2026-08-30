@@ -1016,6 +1016,27 @@ class Builder:
                 cands = eligible(0)
             if not cands:
                 return None
+            # This ranks by POINTS PER DOLLAR with the denominator clamped
+            # at 2000, so the cheapest bat wins ties by construction, and a
+            # roster's BEST hitters rank worst precisely because they are
+            # expensive. Seen live on 08/29: Bryce Harper (bs 50.7) and Kyle
+            # Schwarber (49.2), the two best PHI bats, were skipped entirely
+            # while Alec Bohm (30.4) took 7 of 10 lineups.
+            #
+            # Tested and NOT adopted. Ranking on bs itself, with the existing
+            # budget reserve handling affordability, was measured over 256
+            # builds across 9 slates:
+            #
+            #     vs control     best   hit top-10      sd
+            #     bsrank       +2.174        0.188   -0.762
+            #     bsrank47     +3.747        0.175   -0.443
+            #     minspend47   +3.822        0.175   -0.265
+            #
+            # Real but small, and it does not beat the salary floor alone --
+            # both push toward spending on better players, so they are the
+            # same intervention by different routes and do not add. The 08/29
+            # miss was a 3-team slate where short candidate lists left the
+            # value sort nowhere to hide; on a full card it washes out.
             cands.sort(key=lambda x: -(x["bs"] / max(x["salary"], 2000) * 1000
                                        + rng.uniform(0, 2)))
             pick = cands[min(rng.randrange(0, 3), len(cands) - 1)]

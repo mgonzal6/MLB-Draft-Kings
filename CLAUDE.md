@@ -85,11 +85,55 @@ the 10th-place score is strongly negative (a 10-team card needed 205.9 on
 construction. The relationship is looser than it first looked -- 08/28 was a
 24-team card and still needed 160 -- so treat it as directional.
 
-**Backtests here systematically flatter variants.** Four arms in a row
-measured positive and lost live. Arms get tuned on the same handful of
-contests they are then scored against, and each run tests ~24 hypotheses so
-one p<0.05 is what chance produces. Nothing should ship on a backtest alone;
-new contests are the only real holdout.
+**Backtests here systematically flatter variants.** Arms get tuned on the same
+handful of contests they are then scored against, and each run tests ~24
+hypotheses so one p<0.05 is what chance produces. Nothing should ship on a
+backtest alone; new contests are the only real holdout.
+
+**Control has won every live head-to-head. Six arms and counting.**
+
+    slate      control   experiment            winner
+    08/26 am      86.8   spend15      77.3     control
+    08/26 pm      80.9   spend15      80.8     tie
+    08/27        128.8   minspend47  125.3     control
+    08/28        127.5   maxcorr47   120.3     control
+    08/29 x2      71.4   maxcorr47    66.0     control
+                  69.2                67.4     control
+
+maxcorr47 measured +7.60 on best and better on 8 of 9 slates -- the strongest
+backtest result of the project -- and lost all three live contests. Default to
+running control until something survives on slates it was not scored against.
+
+**What actually has live evidence:** entering BEFORE first pitch (on 08/29 the
+pre-existing entries beat late-swap builds by ~23 pts/lineup, essentially all
+of it points from games that had already locked), and volume (20 -> 40 lineups
+took the top-10 hit rate 0.062 -> 0.250).
+
+## Daily flow
+
+    python preflight.py                  # gate: are lineups posted?
+    python filtered_DK_Salaries.py       # match the two load/ downloads
+    python mlb_odds.py --csv mlb_odds.csv
+    python vegas_sp_adjust.py
+    python build_portfolio.py --variant control --lineups 40
+    python make_entries.py --arms control [--duplicates]
+
+`make_entries.py` writes lineups into DK's entries (late-swap) CSV. It never
+touches a row containing a (LOCKED) player, takes the NEWEST matching upload
+(two slates can share a date -- picking a stale one silently entered an
+afternoon portfolio into evening contests), and verifies before writing.
+
+Add `--allow-unconfirmed` (build_portfolio, vegas_sp_adjust) or
+DK_ALLOW_UNCONFIRMED=1 (preflight, validate_upload) when the later games have
+not posted. Check whether it is actually needed first: on 08/29 the slate was
+already fully confirmed via the OAK->ATH remap and the flag made the build
+worse, dropping it from 10 lineups to 4.
+
+**Thin slates cap the portfolio.** A 3-game card had 3 of 8 pitchers clear
+HARD_AVOID_BS=10, covering 2 of 3 games, so the builder capped itself at 10
+lineups rather than over-concentrate. That is correct behaviour. Filling 40
+entries there means duplicating, which pays independently but adds no
+coverage.
 
 ## Scripts are Linux-clean
 
