@@ -1,0 +1,166 @@
+r"""Write built lineups into DK's entries (late-swap) CSV.
+
+    python make_entries.py                         # newest DKEntries in load/
+    python make_entries.py --arms control,maxcorr47
+    python make_entries.py --entries "G:\...\DKEntries (829pm).csv"
+
+DK's bulk-edit export lists every entry you hold for a draft group, one row
+per entry, with the roster in ten columns whose headers repeat (P,P,...,
+OF,OF,OF). Rows come in three kinds and each is handled differently:
+
+  blank    a reservation with no lineup yet -- free to fill
+  open     a lineup with no locked player -- free to overwrite
+  locked   contains at least one "(LOCKED)" player, meaning that game has
+           started. NEVER touched: the slot cannot be changed and rewriting
+           the row would corrupt the entry.
+
+Two traps this exists to avoid, both hit by hand on 08/29:
+
+  * pandas deduplicates the repeated headers to P.1/OF.1/OF.2 on read and
+    writes those names back out, producing a file DK rejects. Everything here
+    uses csv, never pandas, and the header row is copied verbatim.
+  * filling a locked row silently discards a started player. Locked rows are
+    compared before and after and the run fails if any changed.
+
+Arms are spread evenly across every contest rather than one arm per contest,
+so an A/B faces the same field -- the comparison the whole variant programme
+depends on.
+"""
+import argparse
+import csv
+import glob
+import io
+import os
+import sys
+
+LOAD = r"G:\My Drive\DK\load"
+EXPORT = r"G:\My Drive\DK\export"
+SLOTS = list(range(4, 14))          # P,P,C,1B,2B,3B,SS,OF,OF,OF
+ID_COL, CONTEST_COL = 0, 2
+
+
+def newest_entries(folder=LOAD):
+    """DK's download often mangles the extension ('DKEntries (1).csv (16)'),
+    so match on the name rather than trusting it ends in .csv."""
+    cand = [p for p in glob.glob(os.path.join(folder, "*"))
+            if "dkentries" in os.path.basename(p).lower()
+            and not os.path.basename(p).startswith("~$")]
+    return max(cand, key=os.path.getmtime) if cand else None
+
+
+def read_rows(path):
+    with open(path, encoding="utf-8-sig") as fh:
+        return list(csv.reader(io.StringIO(fh.read())))
+
+
+def state(r):
+    if len(r) < max(SLOTS) + 1 or not r[ID_COL].strip():
+        return "skip"
+    cells = [r[i] for i in SLOTS]
+    if not any(c.strip() for c in cells):
+        return "blank"
+    return "locked" if any("(LOCKED)" in c for c in cells) else "open"
+
+
+def load_arm(name, slate_date):
+    for pat in ("DK_upload_%s_%s_live.csv" % (slate_date, name),
+                "DK_upload_%s_%s.csv" % (slate_date, name)):
+        p = os.path.join(EXPORT, pat)
+        if os.path.exists(p):
+            rows = read_rows(p)[1:]
+            return p, [r for r in rows if len(r) >= 10 and r[0].strip()]
+    return None, []
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--entries", default=None,
+                    help="DKEntries csv (default: newest in the load folder)")
+    ap.add_argument("--arms", default="control",
+                    help="comma-separated variant names to fill from")
+    ap.add_argument("--slate-date", default=None,
+                    help="e.g. 08_29_2026 (default: infer from the newest "
+                         "DK_upload in export)")
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+
+    src = args.entries or newest_entries()
+    if not src or not os.path.exists(src):
+        sys.exit("no DKEntries file found in %s -- download your entries from "
+                 "DK first" % LOAD)
+
+    slate = args.slate_date
+    if not slate:
+        ups = sorted(glob.glob(os.path.join(EXPORT, "DK_upload_*_*.csv")),
+                     key=os.path.getmtime)
+        if not ups:
+            sys.exit("no DK_upload files in export to infer the slate date from")
+        base = os.path.basename(ups[-1])
+        slate = "_".join(base.split("_")[2:5])
+
+    pool, order = {}, []
+    for name in [a.strip() for a in args.arms.split(",") if a.strip()]:
+        path, rows = load_arm(name, slate)
+        if not rows:
+            print("  WARN no upload found for arm '%s' (slate %s)" % (name, slate))
+            continue
+        pool[name] = rows
+        order.append(name)
+        print("  %-12s %2d lineups  <- %s" % (name, len(rows), os.path.basename(path)))
+    if not pool:
+        sys.exit("no lineups to place")
+
+    rows = read_rows(src)
+    hdr, body = rows[0], rows[1:]
+
+    by_contest = {}
+    for i, r in enumerate(body):
+        if state(r) in ("blank", "open"):
+            by_contest.setdefault(r[CONTEST_COL], []).append(i)
+    fillable = sum(len(v) for v in by_contest.values())
+    supply = sum(len(v) for v in pool.values())
+    print("\n%s\n  %d entry rows, %d fillable, %d lineups available"
+          % (os.path.basename(src), len(body), fillable, supply))
+    if supply < fillable:
+        print("  NOTE only %d of %d fillable rows can be filled" % (supply, fillable))
+
+    used = {k: 0 for k in pool}
+    assigned = {}
+    for cid, idxs in sorted(by_contest.items()):
+        for k, i in enumerate(idxs):
+            for arm in order[k % len(order):] + order[:k % len(order)]:
+                if used[arm] < len(pool[arm]):
+                    assigned[i] = (arm, pool[arm][used[arm]])
+                    used[arm] += 1
+                    break
+
+    out, filled = [hdr], 0
+    for i, r in enumerate(body):
+        if i in assigned:
+            r = list(r)
+            for slot, player in zip(SLOTS, assigned[i][1]):
+                r[slot] = player
+            filled += 1
+        out.append(r)
+
+    dest = args.out or os.path.join(EXPORT, "DKEntries_upload_%s.csv" % slate)
+    with open(dest, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(out)
+
+    # verification: locked rows untouched, no half-filled row, header verbatim
+    chk = read_rows(dest)
+    bad = sum(1 for a, b in zip(body, chk[1:])
+              if state(a) == "locked" and a != b)
+    half = sum(1 for r in chk[1:] if state(r) in ("open", "locked")
+               and not all(r[i].strip() for i in SLOTS))
+    if chk[0] != hdr or bad or half:
+        sys.exit("VERIFICATION FAILED: header ok=%s, locked altered=%d, "
+                 "half-filled=%d" % (chk[0] == hdr, bad, half))
+    print("  filled %d rows (%s)"
+          % (filled, ", ".join("%s %d" % (k, v) for k, v in used.items())))
+    print("  locked rows untouched, header verbatim -- verified")
+    print("  wrote %s" % dest)
+
+
+if __name__ == "__main__":
+    main()
