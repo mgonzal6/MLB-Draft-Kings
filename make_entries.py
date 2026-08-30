@@ -63,13 +63,26 @@ def state(r):
 
 
 def load_arm(name, slate_date):
-    for pat in ("DK_upload_%s_%s_live.csv" % (slate_date, name),
-                "DK_upload_%s_%s.csv" % (slate_date, name)):
-        p = os.path.join(EXPORT, pat)
-        if os.path.exists(p):
-            rows = read_rows(p)[1:]
-            return p, [r for r in rows if len(r) >= 10 and r[0].strip()]
-    return None, []
+    """Newest matching upload wins.
+
+    Two slates can share a calendar date -- an afternoon card and a late one,
+    or a rebuild after lineups post -- so several DK_upload files exist for
+    the same slate_date. Preferring a fixed suffix picked a STALE build on
+    08/29: the _live file was the afternoon 10-game late-swap portfolio, and
+    it would have been written into the evening contests with players whose
+    games had already finished. Sort by mtime instead.
+    """
+    pats = ["DK_upload_%s_%s.csv" % (slate_date, name),
+            "DK_upload_%s_%s_*.csv" % (slate_date, name)]
+    cand = []
+    for pat in pats:
+        cand += [p for p in glob.glob(os.path.join(EXPORT, pat))
+                 if "_cash_" not in os.path.basename(p)]
+    if not cand:
+        return None, []
+    p = max(set(cand), key=os.path.getmtime)
+    rows = read_rows(p)[1:]
+    return p, [r for r in rows if len(r) >= 10 and r[0].strip()]
 
 
 def main():
@@ -119,8 +132,15 @@ def main():
             by_contest.setdefault(r[CONTEST_COL], []).append(i)
     fillable = sum(len(v) for v in by_contest.values())
     supply = sum(len(v) for v in pool.values())
-    print("\n%s\n  %d entry rows, %d fillable, %d lineups available"
-          % (os.path.basename(src), len(body), fillable, supply))
+    # DK appends a player-reference block after the entries: rows with an
+    # empty Entry ID and data out in columns 14+. They are not entries and
+    # must be counted separately, or the row total is nonsense (297 lines for
+    # a 40-entry file). state() already skips them; this is just the report.
+    entries = [r for r in body if r and r[ID_COL].strip().isdigit()]
+    print("\n%s\n  %d entries across %d contests (+%d player-reference rows)"
+          % (os.path.basename(src), len(entries),
+             len({r[CONTEST_COL] for r in entries}), len(body) - len(entries)))
+    print("  %d fillable, %d lineups available" % (fillable, supply))
     if supply < fillable:
         print("  NOTE only %d of %d fillable rows can be filled" % (supply, fillable))
 
