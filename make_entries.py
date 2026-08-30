@@ -94,6 +94,11 @@ def main():
     ap.add_argument("--slate-date", default=None,
                     help="e.g. 08_29_2026 (default: infer from the newest "
                          "DK_upload in export)")
+    ap.add_argument("--duplicates", action="store_true",
+                    help="once distinct lineups run out, repeat them to fill "
+                         "every entry. Each entry scores independently so a "
+                         "duplicate pays independently, but it adds no "
+                         "coverage")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -145,14 +150,27 @@ def main():
         print("  NOTE only %d of %d fillable rows can be filled" % (supply, fillable))
 
     used = {k: 0 for k in pool}
+    dupes = 0
     assigned = {}
     for cid, idxs in sorted(by_contest.items()):
         for k, i in enumerate(idxs):
+            placed = False
             for arm in order[k % len(order):] + order[:k % len(order)]:
                 if used[arm] < len(pool[arm]):
                     assigned[i] = (arm, pool[arm][used[arm]])
                     used[arm] += 1
+                    placed = True
                     break
+            if placed or not args.duplicates:
+                continue
+            # Reuse lineups round-robin once the distinct ones run out. Each
+            # entry scores independently, so a duplicate pays independently --
+            # but it buys no extra coverage: the same lineup cannot reach the
+            # top ten twice by being entered twice. Only worth it when the
+            # lineups are +EV on their own.
+            arm = order[dupes % len(order)]
+            assigned[i] = (arm, pool[arm][dupes // len(order) % len(pool[arm])])
+            dupes += 1
 
     out, filled = [hdr], 0
     for i, r in enumerate(body):
@@ -176,8 +194,9 @@ def main():
     if chk[0] != hdr or bad or half:
         sys.exit("VERIFICATION FAILED: header ok=%s, locked altered=%d, "
                  "half-filled=%d" % (chk[0] == hdr, bad, half))
-    print("  filled %d rows (%s)"
-          % (filled, ", ".join("%s %d" % (k, v) for k, v in used.items())))
+    print("  filled %d rows (%s)%s"
+          % (filled, ", ".join("%s %d" % (k, v) for k, v in used.items()),
+             ", %d duplicates" % dupes if dupes else ""))
     print("  locked rows untouched, header verbatim -- verified")
     print("  wrote %s" % dest)
 
