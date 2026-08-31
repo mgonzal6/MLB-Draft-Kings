@@ -999,7 +999,7 @@ class Builder:
         wins = stack_windows(self.hit_pool, stack_t, spec["size"])
         if not wins:
             return None
-        picked = list(wins[rng.randrange(0, min(len(wins), 4))])
+        picked = list(wins[rng.randrange(0, len(wins))])
 
         fill_cap = round(FILL_CAP * self.n_lineups)
 
