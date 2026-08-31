@@ -65,6 +65,43 @@ That is the whole pattern. `minspend47` (a floor on total salary) is the only
 arm to lift `best` without costing spread. Every arm that leaned on `bs` to
 pick winners failed -- because:
 
+**Tightening a cap is NOT removing a bad lineup. Measured and reverted
+(08/30).** The idea: FILL_CAP counted only non-stack appearances, so a bat
+could pass 20% by arriving as a stack member part of the time -- on 08/30
+Canzone, Dubon, Romo and Peters each reached 22-27% of 60 lineups and scored
+0, 5, 3 and 3. Six cheap bats appeared to be setting the floor of the whole
+portfolio. The fix counted every appearance and tested the cap when picking
+fills. Replayed over 4 slates against realised player scores:
+
+    slate      min            bottom10       best           over-cap
+    08/27      51.45 -> 31.45  60.31 -> 59.09  172.75 -> same  15 -> 7
+    08/28      37.40 -> same   54.85 -> 55.15  152.05 -> same   7 -> 8
+    08/29 day  33.65 -> 33.25  48.81 -> 47.91  195.90 -> same   5 -> 7
+    08/30      31.05 -> 25.05  54.09 -> 51.33  160.45 -> 156.45  7 -> 1
+
+It made the FLOOR WORSE on 3 of 4 -- the one thing it existed to fix -- was
+neutral-to-negative on `best`, and did not even reduce concentration reliably
+(squeezing fills just pushes it into the stack windows, which stay exempt
+because a stack is a contiguous batting-order run). The only thing it improved
+was the mean, positive on all four, which is exactly the proxy that shipped
+`spend15`.
+
+The mechanism was misread. Those bats do not repeat because of a loophole;
+they repeat because they are the best value at their price. Blocking the
+most-used fill does not delete a bad player, it forces the builder down to a
+worse one -- more names, lower quality per slot. And the read itself was
+selection bias: on the same slate, from the same pool, Duran at 22% scored
+25.0 and Freeman at 23% scored 12.0. Six coin flips, and only the losing side
+looked like a structural flaw. Do not re-propose an exposure cap as a floor
+fix.
+
+**Do not add a total-salary floor either.** On 08/30 a 47,000 cut split the
+portfolio 93.45 mean / 146.85 best against 93.15 / 160.45 -- indistinguishable
+on the mean, and the floor DELETES the best lineup of the day, which cost
+46,500. Pooled over the older paired slates, spend>=47k lost the mean in 5 of
+6 files by an average of 21.3 pts/lineup. This is the same direction as the
+SP-spend finding below; unspent salary is not the defect.
+
 **`bs` does not predict anything.** Against realised FPTS, hitters: Salary
 +0.111, AvgPointsPerGame +0.104, avg26 +0.104, `bs` +0.047 (p=0.26, sign
 flips across slates). Residualised on salary, `bs` adds **-0.033** for
@@ -160,6 +197,29 @@ below their contest median (08/28-29 ran 59%), 10.0% landed in the top 5-10%
 band (was 3.0%), and 13.3% in the top 10-20% (was 5.0%). First slate where the
 SHAPE improved rather than one lineup spiking. Still 0 top-10 finishes in 8
 contests.
+
+**Why #1 is not a ranking problem, from 08/30.** The winners scored 179-191.
+Our 160.45 had NO spike -- its best player was 27.6 -- and ranked 11th purely
+by having no busts, worst four players summing +25 with no zeros. Meanwhile
+the bottom ten lineups summed -0.6 across their worst four and averaged 3.0
+zeros or negatives. `worst4` is what separates the portfolio, not `top3`.
+
+And we DID stack the team that erupted. NYY put five men in the slate's top
+eleven (Caballero 28.0, Warren 27.6, Goldschmidt 26.0, Chisholm 26.0, Ramos
+25.0); we had 4 lineups with 3+ NYY bats, one with 5, and the best of them
+made 146.85. Picking the right TEAM was not the problem -- you needed the
+right five of nine, owned 1.2 / 3.9 / 2.7 / 2.0 / 1.7 percent. NYY also had
+the second-LOWEST implied total on the card, so concentrating on high-implied
+teams would have missed it entirely.
+
+The three best pitching scores came from arms ranked 9th, 11th and 14th of 14
+by adj_blended (Mahle 28.0, Matthews 27.8, Scherzer 38.5 -- Scherzer banned
+outright by HARD_AVOID_BS), while Framber Valdez, the LOWEST adj_bs in the
+pool, scored a healthy 13.3. And `metric_study` over 14 paired slates now puts
+every metric between -0.17 and -0.06 within-slate: floor_target, proj_points,
+ceiling, max_stack, Salary. Nothing we compute ranks lineups. #1 is a lottery
+over which two or three sub-3%-owned players erupt; more draws is the only
+lever that touches it.
 
 **What actually has live evidence:** entering BEFORE first pitch (on 08/29 the
 pre-existing entries beat late-swap builds by ~23 pts/lineup, essentially all
