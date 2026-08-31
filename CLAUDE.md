@@ -284,6 +284,62 @@ pts/start against 13.42 for eligible ones over ~10 slates -- but a banned arm
 was the single best arm on the slate 2 times in 10. Leave it at 10; 5 is
 indistinguishable, 15 and 20 cost 21 points.
 
+## What top-10 lineups look like, and why we cannot copy them
+
+190 top-10 lineups against 58,706 field lineups and 415 of ours, over 21
+contests:
+
+                        TOP-10    FIELD     OURS
+    5-stack share        71.1%    53.8%    25.5%
+    max stack             4.65     4.18     3.95
+    teams used            4.31     4.95     5.58
+    ownership sum        119.8    112.6     97.8
+    sub-5%-owned          3.47     3.77     4.90
+    SP salary           17,241   17,470   17,235   <- we match
+    hitter salary       32,356   32,158   30,398
+
+Stack size is not survivorship. P(top 10) across the whole field rises
+monotonically with it: 0.137% / 0.193% / 0.322% / 0.436% for a 2/3/4/5-stack,
+and the mean rises too.
+
+**And yet every change pointed at that profile made things worse.** Force
+5-stacks -11.89, force 5,5,4 -14.54, hitter salary floor -10.03/-18.54, rank
+windows by avg26 -12.82, rank windows by batting order -16.50, allocate purely
+on Vegas implied -2.59. The reason is always the same: the constraint gets
+satisfied using OUR ranking, and our ranking is `bs`, which predicts nothing.
+Winners have five bats on the RIGHT team. We can force five bats; we cannot
+pick the team. The gap is team selection, and the only signal that predicts
+team output (implied_total, +0.167) is already in `allocate_stacks`.
+
+**Ownership is the one forecastable thing on a slate, and using it still did
+not help.** `build_hitter_pool` now computes `own_pct`, a 0-100
+projected-ownership percentile from batting order + implied total +
+AvgPointsPerGame, z-scored within slate and equally weighted. Against realised
+%Drafted over 9 slates and 1,375 player-slates: rho +0.622 mean, worst +0.493,
+no sign flips. Adding salary or avg26 made it worse. For scale, every metric
+in metric_study predicts realised POINTS between -0.17 and -0.06.
+
+Both ways of spending it failed:
+
+    --hitter-min-own 10 / 20 / 30   avg best  -8.05 / -12.21 / -9.68
+    barbell, >=2 / >=3 chalk bats   avg best  -4.41 / +0.84
+
+The floor failed because winners DO NOT avoid low-owned players. Their three
+lowest-owned sum to 10.61 against the field's 10.05, and they carry 2.05
+sub-3%-owned bats against the field's 2.15 -- statistically the same. Their
+whole ownership edge is at the TOP: three highest-owned sum 73.39 vs 68.48.
+The old `own_min` study (+0.126, p=0.015) measured a correlation, not a lever;
+winners' minimum owned player is 2.13% and ours is 1.96%. 08/30 is the proof
+-- the NYY eruption that won it was Caballero 1.2%, Chisholm 2.0%,
+Goldschmidt 2.7%, Ramos 1.7%, and any ownership floor bans all four.
+
+The barbell aimed at the right end and still landed at +0.84 per slate, 2-2
+with 5 slates unchanged -- a null by the bar set above. `own_pct` is kept and
+written into portfolio_summary as `own_mean` / `own_min` so metric_study can
+score it against future results, exactly as floor_target is kept. It gates
+nothing. `--hitter-min-own` exists, defaults off, and is documented here as
+tested and failed.
+
 **Every constraint tightening trades floor for ceiling.** Tighter fill caps,
 bigger stacks, hitter floors, a higher SP ban -- each one lifts the bottom of
 the portfolio and shortens the top. Seven ideas, seven dead, and this is the
