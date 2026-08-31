@@ -79,7 +79,9 @@ fills. Replayed over 4 slates against realised player scores:
     08/29 day  33.65 -> 33.25  48.81 -> 47.91  195.90 -> same   5 -> 7
     08/30      31.05 -> 25.05  54.09 -> 51.33  160.45 -> 156.45  7 -> 1
 
-It made the FLOOR WORSE on 3 of 4 -- the one thing it existed to fix -- was
+(Four slates only, so provisional by the standard set below -- but it failed
+on its own terms, which no wider set would rescue.) It made the FLOOR WORSE
+on 3 of 4 -- the one thing it existed to fix -- was
 neutral-to-negative on `best`, and did not even reduce concentration reliably
 (squeezing fills just pushes it into the stack windows, which stay exempt
 because a stack is a contiguous batting-order run). The only thing it improved
@@ -225,6 +227,68 @@ lever that touches it.
 pre-existing entries beat late-swap builds by ~23 pts/lineup, essentially all
 of it points from games that had already locked), and volume (20 -> 40 lineups
 took the top-10 hit rate 0.062 -> 0.250).
+
+## The replay harness, and the 08/30 sweep it ran
+
+Since the A/B channel is closed, the only test left is REPLAY: rebuild a
+frozen snapshot, then score every lineup against the player FPTS in that
+slate's standings export. That measures the build directly instead of through
+a contest field. Nine snapshots pair to a standings file (08/23, 08/24, 08/25,
+08/26, 08/27, 08/28, 08/29 evening, 08/29 day, 08/30); the pairing is by SP
+name overlap. Score on `best`.
+
+**USE ALL NINE. Four slates produced a false positive on 08/30.** A floor of
+`--hitter-min-avg26 4.0` measured +12.75 on `best` over the four newest
+slates and -20.50 over all nine (better on 2, worse on 6, tied 1). The two it
+won were the two recent slates that made up half the small set -- the exact
+failure CLAUDE.md already warns about, reproduced in an afternoon. Anything
+scored on fewer than nine is provisional and should say so.
+
+Everything tried on 08/30, all reverted, all scored on `best`:
+
+    change                                slates   avg delta   verdict
+    any-N stack (ignore batting order)      9       -20.49     confirms current
+    5,5,4 bigger primary stacks             4       -26.00     no
+    secondary 3-man stack                   9        -6.39     no
+    window ranked by batting order          4       -16.50     no
+    hitter floor avg26 >= 4.0               9        -2.28     no
+    hitter floor avg26 >= 6.0               4       -21.71     no
+    hitter min-salary 3000 / 3500           4    -10.03/-18.54 no
+    HARD_AVOID_BS 0 / 5 / 15 / 20           9   -5.15/0/-21.05/-21.05  keep 10
+
+**The consecutive stack is the one confirmed positive, and it is large.**
+Replacing contiguous batting-order windows with "any N off the team, best bs
+first" cost 20.49 points of `best` per slate, worse on 8 of 9 and better on
+none. It also stopped filling the portfolio (38-57 lineups instead of 59-60),
+because a team's best-rated bats keep colliding on position, and it broke the
+audit until deduped -- the contiguous version gets dedup free from its
+batting-order dict. Correlation, position spread and dedup out of one
+construction. Do not touch `stack_windows`.
+
+**A 6-man stack is ILLEGAL.** `--stack-sizes 6,5,4` builds and then the audit
+refuses to write it: DK caps a Classic roster at 5 hitters from one team. Any
+"more concentration" idea is bounded there, and 5,5,4 is worse than 5,4,3.
+
+**The ceiling comes from maximum concentration on ONE team.** That is why the
+secondary stack fails: two 3-man runs need two teams to erupt, one 5-man run
+needs one. 08/30 is the illustration -- NYY put five men in the slate's top
+eleven and only a heavy NYY lineup could have caught it.
+
+**`HARD_AVOID_BS` is not what excludes weak arms.** Disabling it entirely
+(-999) did NOT roster Max Scherzer on 08/30 despite his 38.5, the slate's top
+score, and `best` did not move. `pick_sp_pair` prefers adj_blended >= median
+for ceiling/core and 10 <= adj_bs < 40 for contrarian; at adj_bs -2.00 he
+fails both bands and loses the fallback pool to 17 better-rated arms. The ban
+is still mildly justified on its own terms -- banned arms average 10.91
+pts/start against 13.42 for eligible ones over ~10 slates -- but a banned arm
+was the single best arm on the slate 2 times in 10. Leave it at 10; 5 is
+indistinguishable, 15 and 20 cost 21 points.
+
+**Every constraint tightening trades floor for ceiling.** Tighter fill caps,
+bigger stacks, hitter floors, a higher SP ban -- each one lifts the bottom of
+the portfolio and shortens the top. Seven ideas, seven dead, and this is the
+shape of all of them. `best` is the objective, so the trade is always the
+wrong way round.
 
 ## Daily flow
 
