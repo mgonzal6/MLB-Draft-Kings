@@ -149,28 +149,48 @@ def main():
     if supply < fillable:
         print("  NOTE only %d of %d fillable rows can be filled" % (supply, fillable))
 
+    # Deal round-robin ACROSS contests instead of filling one contest at a
+    # time. Sequential filling gave each contest a contiguous block of the
+    # portfolio, and the portfolio is ordered CEILING -> CORE -> CONTRARIAN,
+    # so the tiers ended up sorted by contest. On 08/30 that put all twelve
+    # contrarian lineups into one contest, which finished 38.5 points off its
+    # 10th-place score, while the best lineup of the day landed in the
+    # contest with the HIGHEST bar and missed the top ten by 0.50 -- it would
+    # have finished top ten in either of the other two. Interleaving gives
+    # every contest the same mix of tiers.
+    #
+    # Nothing here assumes a contest count or equal entries per contest: the
+    # deal takes the k-th free row of each contest in turn and stops when a
+    # contest runs out, so 2 contests or 9, evenly or unevenly filled, all
+    # deal the same way.
+    contests = sorted(by_contest)
+    slots = []
+    for k in range(max((len(v) for v in by_contest.values()), default=0)):
+        for cid in contests:
+            if k < len(by_contest[cid]):
+                slots.append(by_contest[cid][k])
+
     used = {k: 0 for k in pool}
     dupes = 0
     assigned = {}
-    for cid, idxs in sorted(by_contest.items()):
-        for k, i in enumerate(idxs):
-            placed = False
-            for arm in order[k % len(order):] + order[:k % len(order)]:
-                if used[arm] < len(pool[arm]):
-                    assigned[i] = (arm, pool[arm][used[arm]])
-                    used[arm] += 1
-                    placed = True
-                    break
-            if placed or not args.duplicates:
-                continue
-            # Reuse lineups round-robin once the distinct ones run out. Each
-            # entry scores independently, so a duplicate pays independently --
-            # but it buys no extra coverage: the same lineup cannot reach the
-            # top ten twice by being entered twice. Only worth it when the
-            # lineups are +EV on their own.
-            arm = order[dupes % len(order)]
-            assigned[i] = (arm, pool[arm][dupes // len(order) % len(pool[arm])])
-            dupes += 1
+    for k, i in enumerate(slots):
+        placed = False
+        for arm in order[k % len(order):] + order[:k % len(order)]:
+            if used[arm] < len(pool[arm]):
+                assigned[i] = (arm, pool[arm][used[arm]])
+                used[arm] += 1
+                placed = True
+                break
+        if placed or not args.duplicates:
+            continue
+        # Reuse lineups round-robin once the distinct ones run out. Each
+        # entry scores independently, so a duplicate pays independently --
+        # but it buys no extra coverage: the same lineup cannot reach the
+        # top ten twice by being entered twice. Only worth it when the
+        # lineups are +EV on their own.
+        arm = order[dupes % len(order)]
+        assigned[i] = (arm, pool[arm][dupes // len(order) % len(pool[arm])])
+        dupes += 1
 
     out, filled = [hdr], 0
     for i, r in enumerate(body):

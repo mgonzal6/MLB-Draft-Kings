@@ -148,6 +148,19 @@ of the 08/28 entries hash exactly to `DK_upload_08_28_2026_minspend47.csv` and
 there is no 08/28 control build anywhere on disk -- so whatever that row
 describes, it is not contests 194551192 or 194552963. Treat it as unverified.
 
+**08/30 came within 0.50 of the objective, and placement cost it.** 60 control
+lineups over 3 contests. Best lineup 160.45, rank 11 of 1,094, against a
+10th-place score of 160.95. The same lineup would have finished TOP TEN in
+either of the other two contests that day (bars 160.30 and 159.95) -- it went
+into the one with the highest bar. Gaps by contest: -0.50, -13.45, -38.50,
+against a previous project best of -5.10 and a typical -41 to -56.
+
+The distribution moved too, not just the headline: half the entries finished
+below their contest median (08/28-29 ran 59%), 10.0% landed in the top 5-10%
+band (was 3.0%), and 13.3% in the top 10-20% (was 5.0%). First slate where the
+SHAPE improved rather than one lineup spiking. Still 0 top-10 finishes in 8
+contests.
+
 **What actually has live evidence:** entering BEFORE first pitch (on 08/29 the
 pre-existing entries beat late-swap builds by ~23 pts/lineup, essentially all
 of it points from games that had already locked), and volume (20 -> 40 lineups
@@ -173,6 +186,14 @@ of `--lineups`, so 60 concentrates no more than 20 did: 08/28's top arm sat at
 touches a row containing a (LOCKED) player, takes the NEWEST matching upload
 (two slates can share a date -- picking a stale one silently entered an
 afternoon portfolio into evening contests), and verifies before writing.
+
+It deals lineups ROUND-ROBIN across contests. It used to fill one contest at
+a time, which handed each a contiguous block of a portfolio ordered CEILING ->
+CORE -> CONTRARIAN -- so the tiers came out sorted by contest. On 08/30 that
+put all twelve contrarian lineups in one contest (which finished 38.5 off its
+bar) while another got 20 straight CORE. Interleaving gives every contest the
+same tier mix and assumes nothing about how many contests there are or whether
+they hold equal numbers of entries.
 
 Add `--allow-unconfirmed` (build_portfolio, vegas_sp_adjust) or
 DK_ALLOW_UNCONFIRMED=1 (preflight, validate_upload) when the later games have
