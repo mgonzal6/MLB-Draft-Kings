@@ -597,7 +597,7 @@ def build_hitter_pool(dk, lu, hcache, opp_map, vegas=None):
     Reported as a 0-100 percentile within the slate so a threshold reads the
     way DK's own %Drafted column does.
     """
-    pool = []
+    pool, seen = [], {}          # seen: nname -> index in pool
     hit_rows = lu[slate_io.confirmed_mask(lu["conf"])]
     slate_io.unconfirmed_banner(int((hit_rows["conf"] != "Y").sum()),
                                 "HITTERS")
@@ -622,8 +622,29 @@ def build_hitter_pool(dk, lu, hcache, opp_map, vegas=None):
         slots = set()
         for p in str(d["Roster Position"]).split("/"):
             slots.update({"OF1", "OF2", "OF3"} if p == "OF" else {p})
+        # DOUBLEHEADERS put the same player in the feed twice, once per
+        # game_number, at DIFFERENT batting orders -- on 08/29 that was 27
+        # players, e.g. Ceddanne Rafaela batting 2nd in game 1 (confirmed)
+        # and 4th in game 2 (a projection). With --allow-unconfirmed both
+        # rows pass, so he entered the pool twice and could occupy two slots
+        # of one "contiguous" batting-order window. The audit's duplicate
+        # check was the only thing catching it, and only sometimes: the
+        # window list is normally sampled from its first four entries, and
+        # the offending construction sits at the end.
+        #
+        # Keep one row per player, preferring the CONFIRMED one -- a posted
+        # lineup beats a projection for the other half of a twin bill.
+        prev = seen.get(r["nname"])
+        if prev is not None:
+            if pool[prev]["conf"] == "Y" or r["conf"] != "Y":
+                continue                      # keep what we already have
+            pool.pop(prev)                    # replace projection with posted
+            seen = {k: (v - 1 if v > prev else v)
+                    for k, v in seen.items() if v != prev}
+        seen[r["nname"]] = len(pool)
         apg = pd.to_numeric(d.get("AvgPointsPerGame"), errors="coerce")
         pool.append({"name": d["Name"], "id": d["Name + ID"], "team": d["TeamAbbrev"],
+                     "conf": r["conf"],
                      "opp": opp_map[d["TeamAbbrev"]], "salary": int(d["Salary"]),
                      "bo": int(bo), "bs": bs, "avg26": avg26, "slots": slots,
                      "apg": float(apg) if pd.notna(apg) else 0.0})
@@ -999,7 +1020,7 @@ class Builder:
         wins = stack_windows(self.hit_pool, stack_t, spec["size"])
         if not wins:
             return None
-        picked = list(wins[rng.randrange(0, len(wins))])
+        picked = list(wins[rng.randrange(0, min(len(wins), 4))])
 
         fill_cap = round(FILL_CAP * self.n_lineups)
 
