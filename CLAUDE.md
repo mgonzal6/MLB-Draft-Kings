@@ -340,6 +340,22 @@ score it against future results, exactly as floor_target is kept. It gates
 nothing. `--hitter-min-own` exists, defaults off, and is documented here as
 tested and failed.
 
+**Parked for the next contest.** Nothing experimental is shipped -- the
+builder is exactly the 08/30 build plus the doubleheader fix. Two things are
+waiting on a 10th slate:
+
+  * `own_mean` / `own_min` are now written into portfolio_summary, so once
+    tomorrow's standings land, `metric_study.py` scores projected ownership
+    against realised points for the first time. That is the measurement the
+    whole ownership detour was for; the floor and barbell both failed, but
+    nothing has yet asked whether own_pct predicts SCORING rather than
+    %Drafted.
+  * The nine-slate replay set becomes ten. Every result below was measured on
+    nine, and the day's clearest lesson is that four slates invert results.
+    The three closest calls -- secondary stack (-6.39), pure-Vegas allocation
+    (-2.59) and uniform window sampling (-2.10) -- are the ones a tenth slate
+    could actually move. The rest lost by more than 10 and are not close.
+
 **Every constraint tightening trades floor for ceiling.** Tighter fill caps,
 bigger stacks, hitter floors, a higher SP ban -- each one lifts the bottom of
 the portfolio and shortens the top. Seven ideas, seven dead, and this is the
@@ -380,6 +396,24 @@ DK_ALLOW_UNCONFIRMED=1 (preflight, validate_upload) when the later games have
 not posted. Check whether it is actually needed first: on 08/29 the slate was
 already fully confirmed via the OAK->ATH remap and the flag made the build
 worse, dropping it from 10 lineups to 4.
+
+**Doubleheaders duplicated hitters in the pool, and it cost a top-10.** The
+lineups feed carries one row per `game_number`, so on a twin bill the same
+player appears twice at DIFFERENT batting orders -- 08/29 had 27, e.g.
+Ceddanne Rafaela batting 2nd in game 1 (confirmed) and 4th in game 2 (a
+projection). Under `--allow-unconfirmed` both rows pass, so one player could
+fill two slots of a supposedly contiguous window. `build_hitter_pool` now
+keeps one row per player, preferring the confirmed one. Best is unchanged on
+the seven single-header slates and goes 195.90 -> 211.35 on 08/29's
+doubleheader -- 12.65 ABOVE that contest's 10th-place score of 198.70. This
+only bites under `--allow-unconfirmed`, which is exactly the morning build.
+
+**Watch for outside commits mid-session.** `ff86cb5` ("update build",
+committed from GitHub Desktop while experiments were running) captured an
+in-flight patch -- uniform window sampling, `randrange(0, len(wins))` -- that
+was about to be reverted. It measured -2.10 on best and failed the audit
+outright on one slate. Restored in 1746704. While a sweep is running the
+working tree is a scratch surface, not a state worth committing.
 
 **Thin slates cap the portfolio.** A 3-game card had 3 of 8 pitchers clear
 HARD_AVOID_BS=10, covering 2 of 3 games, so the builder capped itself at 10
