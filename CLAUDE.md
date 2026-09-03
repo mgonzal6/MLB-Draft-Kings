@@ -111,6 +111,43 @@ hitters and **-0.198** for pitchers. Our custom ranking carries nothing the
 price tag does not already contain. Everything downstream of it is
 rearrangement.
 
+**`bs` is worse than its own ingredients, and 57% of it is noise.** Rerun on
+09/02 over 18 slate-files, confirmed hitters, within-slate Spearman against
+realised FPTS:
+
+    metric     mean    worst    positive on
+    Salary    +0.152   +0.020   18 of 18
+    avg26     +0.127   +0.036   18 of 18
+    hr_pg     +0.103   -0.032   16 of 18
+    ceiling   +0.091   -0.053   15 of 18
+    l3_avg    +0.090   -0.058   12 of 18
+    bs        +0.079   -0.075   13 of 18
+
+Every component beats the composite, and only Salary and avg26 never go
+negative. Decomposing `bs` on 08/31's 108 confirmed hitters, by share of
+spread: form (+-15) 33%, yoy x4 (+-20) 24%, the avg26 base 20%, hr_pg 12%,
+ceiling 6%, bb% 3%, sb 2%. The two noisiest terms -- a three-game hot/cold
+flag and a year-over-year delta -- are 57% of the score and the season
+average is a fifth of it. The caps are not the problem: 0 of 108 hitters
+exceeded `avg26 * 2.8 = 35`.
+
+**Replacing it in the fill sort still loses.** The fill sort is `bs / salary`
+and it picks every non-stack hitter, so it is the one place per-player
+accuracy should matter. Swapping to `avg26 / salary` over the ten-slate
+replay: +18.00, +4.00, +3.40, +1.05, 0.00, -13.00, -15.40, -16.50, -20.45,
+-39.00 -- better on 4, worse on 5, mean **-7.79**.
+
+And not because it concentrated the portfolio; it did the opposite (distinct
+players 116->119, 79->82, 148->161, 111->116). The better metric picked more
+different bats and still scored less. The reason is in the residuals above:
+once salary is controlled, avg26 adds -0.014 and bs -0.001, so both are only
+re-expressing price -- and the sort divides by salary, cancelling the one real
+signal either carries. What remains is arbitrary, and `bs`'s arbitrariness
+happens to suit these ten slates.
+
+So: `bs` is a bad metric AND replacing it does not help. Do not read the first
+half as a reason to try the second. This slot is not where the leverage is.
+
 **Fixing a broken input was worth about a point.** vegas_adj demonstrably
 corrupts pitcher ranking (-0.179 paired, negative on 9 of 9 slates), and
 removing it moved portfolio results +1. Do not assume better projections will
