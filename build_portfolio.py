@@ -1003,9 +1003,10 @@ class Builder:
         # max-correlation arms always take the bring-back: the point is to
         # bet the whole GAME, not just one side of it.
         spec["bringback"] = bool(
-            self.force_bringback
-            or (stack_t in self.vegas.index
-                and self.vegas.loc[stack_t, "game_total"] >= BRINGBACK_TOTAL))
+            not spec.get("no_bringback")
+            and (self.force_bringback
+                 or (stack_t in self.vegas.index
+                     and self.vegas.loc[stack_t, "game_total"] >= BRINGBACK_TOTAL)))
         pairs = self.pick_sp_pair(spec, rng)
         if not pairs:
             return None
@@ -1028,8 +1029,27 @@ class Builder:
         if spec["bringback"]:
             opp_t = self.opp_map[stack_t]
             if opp_t not in banned:
+                # The bring-back has to leave the remaining slots affordable.
+                # It ranks purely on bs, so it reaches for the dearest bat on
+                # the opposing side, and on an expensive stack that bankrupts
+                # the lineup before the fill loop starts.
+                #
+                # 09/02 evening: MIL had the joint-highest implied total, a
+                # game total of 8.5 that triggers the bring-back, and CHC
+                # opposite. A 5-man MIL window costs 23,200, the top CHC bat
+                # by bs is Pete Crow-Armstrong at 7,000, a median SP pair is
+                # 16,900 -- 47,100 with two slots left and 2,900 to fill them,
+                # against a 2,000 minimum apiece. Those attempts all died:
+                # 4,114 "no valid construction" for MIL, 9 of 17 built in
+                # isolation and 0 of 17 in the real build. Jackson Chourio
+                # (27.0 pts, in 73% of the top 1%) reached none of our 120
+                # lineups because the team he leads off for never stacked.
+                spent = salary + sum(p["salary"] for p in picked)
+                rem = len(HITTER_SLOTS) - len(picked) - 1
+                room = SALARY_CAP - spent - rem * 2000
                 for bb in sorted((h for h in self.hit_pool if h["team"] == opp_t
-                                  and self.fill_appear[h["name"]] < fill_cap),
+                                  and self.fill_appear[h["name"]] < fill_cap
+                                  and h["salary"] <= room),
                                  key=lambda x: -x["bs"])[:4]:
                     if assign_slots(picked + [bb], HITTER_SLOTS):
                         picked.append(bb)
@@ -1202,6 +1222,34 @@ class Builder:
                 if step and cands:
                     self.reject["min spend relaxed to %s" % (level or "none")] += 1
             self.min_total_salary = base
+            if not cands and not spec.get("no_bringback"):
+                # Bend the bring-back rather than drop the lineup, the same way
+                # the min-spend ladder above bends. A 5-man stack plus a
+                # bring-back leaves two slots, and when those cannot be filled
+                # at the remaining positions and budget the spec dies silently.
+                # On 09/02 evening that cost MIL -- joint highest implied total
+                # on the slate -- all 17 of its allocated lineups, and with them
+                # Jackson Chourio, who scored 27.0 and appeared in 73% of the
+                # top 1%. Without the bring-back MIL builds 17 of 17.
+                spec = dict(spec, no_bringback=True)
+                self.reject["bring-back dropped to build the lineup"] += 1
+                for attempt in range(500):
+                    rng = stable_rng(self.seed, spec["stack"], spec["tier"],
+                                     "nobb", attempt)
+                    res = self.try_build(spec, rng)
+                    if not res:
+                        self.reject["no valid construction"] += 1
+                        continue
+                    lu_, salary = res
+                    s_new = set(self.sig(lu_))
+                    if any(len(s_new - set(s0)) < 2 for s0 in self.seen_sigs):
+                        self.reject["too similar to an existing lineup"] += 1
+                        continue
+                    floor = (lu_["SP1"]["blended"] + lu_["SP2"]["blended"]
+                             + sum(sorted((lu_[s]["avg26"] for s in HITTER_SLOTS),
+                                          reverse=True)[:5]) * 2.5)
+                    cands.append((lu_, salary, floor))
+                    break
             if not cands:
                 print(f"  !! no unique valid lineup for {spec['stack']} "
                       f"({spec['tier']}) — skipping, never duplicating")
