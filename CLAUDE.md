@@ -119,7 +119,9 @@ market itself achieves.
 
 **Vegas is good on the hitter side, bad on the pitcher side.** implied_total
 predicts team hitter output at +0.167, beating avg26 and salary, and the fade
-/ stack / bring-back rules all fire correctly. Leave that alone.
+/ stack / bring-back rules all fire correctly. Leave that alone. (The
+bring-back's TARGETING was broken until 09/02 -- see below -- but the rule
+about when to take one is sound.)
 
 **The bring-back could kill a whole team's allocation silently. Fixed
 09/02.** `BRINGBACK_TOTAL` is 8.0, and the bring-back picks the opposing
