@@ -121,6 +121,35 @@ market itself achieves.
 predicts team hitter output at +0.167, beating avg26 and salary, and the fade
 / stack / bring-back rules all fire correctly. Leave that alone.
 
+**Weather is already inside the Vegas number. Do not add it.** The lineups
+feed carries a weather string per team ("65 0 OUT CFLF 3-5 0% H71%outdoor" =
+temp, wind direction and speed, rain %, humidity, dome flag) and nothing reads
+it. It looks powerful if you cut it at the tails -- over 185 outdoor
+team-slates, strong wind OUT (>=8mph) averaged 73.17 top-9 team FPTS against
+60.74 for strong wind IN, and games at 80F+ averaged 69.74 against 56.04 at
+65F or below. Both gaps are artifacts of comparing extremes. On the
+continuum:
+
+    metric                raw    after removing implied_total
+    implied_total       +0.099        --
+    temperature         +0.027      +0.016
+    wind (OUT +, IN -)  +0.017      +0.013
+
+Noise, and what little is there the market has already priced. This is the
+same shape as the ownership detour: a real physical mechanism that the line
+absorbs before we see it.
+
+**DK's own `Starting` column is a second opinion on who is playing, and it is
+not read.** Filtered_DKSalaries.csv carries `Starting` (the batting order per
+DK, or blank) and `Status` (blank on every slate checked -- no injury data).
+`Starting` disagrees with the lineups feed often enough to matter: on 09/02
+evening Jose Fermin was confirmed=Y in the feed and blank in `Starting`. He
+stayed out of the portfolio only because LAA happened to be faded. Cross-
+checking the two would automate the scratch calls that have been made by hand
+(Adael Amador 09/01, 21 of 80 lineups; Max Kepler 08/31, 4 of 142). Not built
+-- judged too rare to be worth the code -- but the column is there when a
+scratch does slip through.
+
 **Portfolio size beats arm choice.** 20 -> 40 lineups took the top-10 hit rate
 0.062 -> 0.250 and best rank 76 -> 29, improving on every slate tested. That
 is roughly twice what the best arm does. It does not fill on thin slates
