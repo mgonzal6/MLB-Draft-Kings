@@ -121,6 +121,44 @@ market itself achieves.
 predicts team hitter output at +0.167, beating avg26 and salary, and the fade
 / stack / bring-back rules all fire correctly. Leave that alone.
 
+**The bring-back could kill a whole team's allocation silently. Fixed
+09/02.** `BRINGBACK_TOTAL` is 8.0, and the bring-back picks the opposing
+team's best bat by `bs` ALONE -- no salary check, no feasibility check. On an
+expensive stack that bankrupts the lineup before the fill loop starts. 09/02
+evening: MIL had the joint-highest implied total, a game total of 8.5, and CHC
+opposite. A 5-man MIL window costs 23,200, the top CHC bat by bs is Pete
+Crow-Armstrong at 7,000, a median SP pair is 16,900 -- 47,100 spent with two
+slots left and 2,900 to fill them against a 2,000 minimum apiece.
+
+    MIL specs alone            built  9 of 17   4,114 no-valid-construction
+    MIL, bring-back disabled   built 17 of 17     145
+    MIN alone (control)        built 17 of 17     169
+    HOU alone (control)        built 17 of 17     220
+
+MIL runs SECOND in spec order, so this was never exhaustion. In the real build
+MIL delivered 0 of 17 and the portfolio contained no MIL stack at all -- and
+because a team's bats can otherwise only arrive through the fill loop's
+`bs/salary` sort, which ranks expensive bats worst, Jackson Chourio (leadoff,
+2nd-best bs on the team, 99th percentile projected ownership, 27.0 points, in
+73% of the top 1%) appeared in NONE of our 120 lineups.
+
+Two changes: the bring-back now has to leave the remaining slots affordable,
+and if a spec still cannot build, it retries once without the bring-back
+rather than dropping the lineup -- the same bend-do-not-drop pattern the
+min-spend ladder already uses. Tonight that took the build from 103 to 113
+lineups, 17 skips to 7, MIL from 0 stacks to 17.
+
+**It does NOT improve `best`, and was shipped anyway.** Over the ten-slate
+replay: 08/24 +12.00, 08/28 -17.10, 08/31 -13.70, seven slates unchanged, mean
+-1.88. It fires on 3 of 10 slates and is a coin flip when it does, because the
+recovered lineups shift the RNG path and exposure counters for every later
+spec, so the whole portfolio changes rather than baseline-plus-extras -- the
+measurement is portfolio churn, not the fix's own effect. It ships because it
+is a correctness defect, not a theory about what wins: the builder was
+allocating 17 lineups to the best offence on the slate, delivering none, and
+reporting it in a log line ("no unique valid lineup for MIL") that reads like
+exhaustion. Do not re-litigate it on `best` alone.
+
 **Weather is already inside the Vegas number. Do not add it.** The lineups
 feed carries a weather string per team ("65 0 OUT CFLF 3-5 0% H71%outdoor" =
 temp, wind direction and speed, rain %, humidity, dome flag) and nothing reads
