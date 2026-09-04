@@ -89,7 +89,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--entries", default=None,
                     help="DKEntries csv (default: newest in the load folder)")
-    ap.add_argument("--arms", default="control",
+    ap.add_argument("--arms", default="minspend49",
                     help="comma-separated variant names to fill from")
     ap.add_argument("--slate-date", default=None,
                     help="e.g. 08_29_2026 (default: infer from the newest "

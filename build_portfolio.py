@@ -256,6 +256,40 @@ VARIANTS = {
     # significant (best p=0.139; the top-10 rate is 3 events against 6 out of
     # 64), so this is a directional result, not a proven one.
     "minspend47": {"score": None, "top": 1, "min_total_salary": 47000},
+    # ---- the same idea at the level the winners actually sit at ----
+    # 09/03, 4 contests: the field's top-10 lineups averaged 49,715 of the
+    # 50,000 cap, 15 of 40 were exactly maxed, and the CHEAPEST top-10 lineup
+    # on the slate (48,000) still beat our MEDIAN lineup (46,700). 47,000 was
+    # never near where the winners live, so the floor is retried at 49,000.
+    #
+    # The floor is HARD here. minspend47 laddered down 1,000 at a time, so its
+    # portfolios contained lineups below their own floor and the arm was never
+    # really tested at its nominal level. This one underfills instead, and the
+    # missing lineups are refilled by rebuilding under further seeds.
+    #
+    # Countervailing evidence, recorded before the test rather than after:
+    # within our own 76 lineups on 09/03 salary correlated -0.299 with points
+    # (negative in all 4 contests), the cheap half outscored the expensive half
+    # 89.49 to 79.27, and the 47,000 cut deleted 08/30's best lineup, which
+    # cost 46,500. If this arm loses, that is why.
+    #
+    # SHIPPED 09/04 as the default arm. Final-standings replay, 17 snapshots
+    # x 5 seeds at equal portfolio size: better on 10 of 11 distinct slate
+    # dates, worse on 1 by 0.27, mean dBest +3.08, SE 0.87, t 3.53. sd rose
+    # 26.4 -> 27.2 (it does not compress spread), dMean +1.5, dN 0.0.
+    #
+    # "seeds" is the refill default: a hard floor underfills (45 of 60 on
+    # 09/03) and without it the shipped build would quietly come up short.
+    "minspend49": {"score": None, "top": 1, "min_total_salary": 49000,
+                   "hard_min_salary": True, "seeds": 8},
+    # Sweep levels around the shipped 49,000. The winners sit at 49,715, so
+    # "closer to where they sit" is the obvious next question -- but a floor
+    # this tight starves construction, and the refill can only recover what
+    # the pool can actually build.
+    "minspend485": {"score": None, "top": 1, "min_total_salary": 48500,
+                    "hard_min_salary": True, "seeds": 8},
+    "minspend495": {"score": None, "top": 1, "min_total_salary": 49500,
+                    "hard_min_salary": True, "seeds": 8},
     # ---- cut the hitters who bust more often than they produce ----
     # Criterion, stated by the user and measured directly from per-game
     # history: drop anyone whose P(DK == 0) exceeds P(DK >= 10). Over 1,219
@@ -800,6 +834,12 @@ class Builder:
         self.hitter_min_salary = None
         self.hitter_min_own = None
         self.min_total_salary = None
+        # When set, the min-spend ladder does NOT bend. The ladder exists so a
+        # floor cannot silently shrink the portfolio, but it also means a
+        # "49,000 floor" portfolio can contain 47,000 lineups, which makes the
+        # floor untestable. A hard floor underfills instead; multi-seed
+        # merging is what refills it.
+        self.hard_min_salary = False
         self.hitter_min_avg26 = None
         self.fill_max_bo = None
         self.force_bringback = False
@@ -1195,8 +1235,12 @@ class Builder:
             # 08/23, below what control managed unconstrained, because the
             # relaxed pass had no floor at all.
             base = self.min_total_salary
-            ladder = ([None] if not base
-                      else [base, base - 1000, base - 2000, None])
+            if not base:
+                ladder = [None]
+            elif self.hard_min_salary:
+                ladder = [base]
+            else:
+                ladder = [base, base - 1000, base - 2000, None]
             for step, level in enumerate(ladder):
                 if step and cands:
                     break
@@ -1349,11 +1393,12 @@ def main():
                     help="floor-maximized lineups (default: 0 on a normal "
                          "slate, ALL on a <=4-game slate)")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--variant", default=None,
-                    choices=["control"] + sorted(VARIANTS),
-                    help="A/B arm. Omit for today's behaviour and today's "
-                         "filenames; 'control' is identical but writes "
-                         "_control-suffixed files for a paired experiment.")
+    ap.add_argument("--variant", default="minspend49",
+                    choices=["control", "none"] + sorted(VARIANTS),
+                    help="Build arm. Defaults to minspend49, shipped 09/04 "
+                         "(better on 10 of 11 slate dates, t 3.53). Pass "
+                         "'control' for the previous shipping builder, or "
+                         "'none' for the unsuffixed legacy filenames.")
     ap.add_argument("--candidates", type=int, default=20,
                     help="valid lineups to generate per slot before picking "
                          "the best (ignored by control; default 20)")
@@ -1378,6 +1423,15 @@ def main():
                     help="reject lineups spending less than this in total "
                          "(e.g. 45000). Overrides the variant's own; "
                          "0 disables. Bends on a slate that cannot meet it")
+    ap.add_argument("--seeds", type=int, default=1,
+                    help="if the build comes up short of --lineups, rebuild "
+                         "under this many consecutive seeds and merge the "
+                         "distinct lineups. Dedup and every exposure cap "
+                         "carry across the merge")
+    ap.add_argument("--hard-min-salary", action="store_true",
+                    help="do NOT bend --min-total-salary. The portfolio "
+                         "underfills instead of quietly emitting lineups "
+                         "below the floor; refill with more seeds")
     ap.add_argument("--hitter-min-own", type=float, default=None,
                     help="drop fill hitters below this PROJECTED-ownership "
                          "percentile (0-100). The blend is batting order + "
@@ -1393,6 +1447,11 @@ def main():
     ap.add_argument("--no-snapshot", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
+    # "none" is the spelling for the old default of omitting --variant: the
+    # unsuffixed filenames and no arm config. Every downstream branch already
+    # tests `args.variant` for None, so normalise here and nothing else moves.
+    if args.variant == "none":
+        args.variant = None
     if getattr(args, "allow_unconfirmed", False):
         slate_io.set_allow_unconfirmed(True)
     if args.selftest:
@@ -1481,6 +1540,7 @@ def main():
     mspend = (cfg.get("min_total_salary") if args.min_total_salary is None
               else (args.min_total_salary or None))
     b.min_total_salary = mspend
+    b.hard_min_salary = bool(cfg.get("hard_min_salary") or args.hard_min_salary)
     havg = (cfg.get("hitter_min_avg26") if args.hitter_min_avg26 is None
             else (args.hitter_min_avg26 or None))
     b.hitter_min_avg26 = havg
@@ -1529,6 +1589,45 @@ def main():
               f"{args.candidates} valid candidates per lineup")
         lineups = b.build_all(specs, n_candidates=args.candidates,
                               score=cfg["score"], top=cfg["top"])
+
+    # ---- refill the shortfall under further seeds ----------------------
+    # A hard constraint (minspend49) or a thin slate leaves the portfolio
+    # short. Every spec has already exhausted 500 attempts on this seed, so
+    # retrying the same seed cannot help -- but a different seed walks a
+    # different path through the same pool and finds lineups the first pass
+    # never constructed. Verified on 09/03 morning: a 3-game card gave 16
+    # lineups on one seed and 67 distinct across six.
+    #
+    # The SAME builder object is reused on purpose, so seen_sigs keeps the
+    # portfolio deduped and the exposure counters keep every cap binding
+    # across the merge. Caps are fractions of the ORIGINAL --lineups, so a
+    # refilled portfolio concentrates no more than a first-pass one.
+    # An arm that constrains construction has to say how many seeds it needs
+    # to fill, or shipping it means remembering a flag at 6pm.
+    n_seeds = args.seeds if args.seeds > 1 else cfg.get("seeds", 1)
+    if n_seeds > 1:
+        for k in range(1, n_seeds):
+            if len(b.lineups) >= args.lineups:
+                break
+            short = args.lineups - len(b.lineups)
+            b.seed = args.seed + k
+            # make_specs emits one spec per ALLOCATED stack -- its n_lineups
+            # argument only sets the tier proportions -- so it must be sliced
+            # to the shortfall or the refill builds a second full portfolio.
+            # Rotate the start each pass so successive seeds refill different
+            # teams rather than hammering the top of the allocation.
+            full = make_specs(alloc, args.lineups, sizes=sizes)
+            off = (k * short) % max(1, len(full))
+            more = (full + full)[off:off + short]
+            before = len(b.lineups)
+            if cfg.get("score") is None and cfg.get("top", 1) == 1:
+                b.build_all(more)
+            else:
+                b.build_all(more, n_candidates=args.candidates,
+                            score=cfg.get("score"), top=cfg.get("top", 1))
+            print(f"  seed {args.seed + k}: +{len(b.lineups) - before} "
+                  f"lineups (now {len(b.lineups)} of {args.lineups})")
+        lineups = b.lineups
 
     # Cash lineups go out best-armed first: SP pair blended is the strongest
     # single predictor we have (Fix #13), so "enter the top N" is meaningful

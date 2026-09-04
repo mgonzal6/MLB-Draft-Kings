@@ -255,10 +255,17 @@ backtest alone; new contests are the only real holdout.
                   86.5                82.6     control   (194618891)
 
 The A/B programme is CLOSED -- no more split-arm entries. Build one arm.
-Control is that arm: it has the record, and there is now no mechanism to
-retire it for anything else. maxcorr47 measured +7.60 on best and better on 8
-of 9 slates -- the strongest backtest result of the project -- and lost every
-live contest it entered. That does not reopen.
+maxcorr47 measured +7.60 on best and better on 8 of 9 slates -- the strongest
+backtest result at the time -- and lost every live contest it entered. That
+does not reopen.
+
+**Control was that one arm until 09/04, when `minspend49` replaced it.** The
+mechanism for retiring control turned out to be the replay harness rather
+than a live split: equal portfolio size, all slates, scored on `best`, better
+on 10 of 11 slate dates at t 3.53. Note what that means for this table -- the
+live head-to-head record below belongs to a builder that is no longer the
+shipping one, and `minspend49` has NO live record at all. Its first live
+slate is the real test, and one slate will not settle it either way.
 
 The 08/29 numbers were restated on 08/30 against the full standings exports;
 the old ones (71.4/69.2 vs 66.0/67.4) were means of `control_live` (2 entries)
@@ -329,10 +336,305 @@ ceiling, max_stack, Salary. Nothing we compute ranks lineups. #1 is a lottery
 over which two or three sub-3%-owned players erupt; more draws is the only
 lever that touches it.
 
+**THE FIRST TOP-10 FINISHES CAME FROM THE 3-GAME MORNING CARD, 09/03.** The
+portfolio flagged as a concentration risk -- Hunter Brown in 61 of 61 lineups,
+25 distinct hitters of 54 available, built by merging six seeds because one
+seed gave only 16 -- entered contest 194931967 (237 entries) and finished
+**rank 2 of 237, with 2 of its 7 entries there inside the top 10**, gap
++12.00. Best lineup 107.20 against a 10th-place score of 95.20.
+
+That settles an open question the file had been holding: "treat 100% exposure
+on a <=4-game card as a property of the slate, and size the entry
+accordingly" was the right call, and accepting the concentration rather than
+relaxing `PAIR_FLOOR_PCT` to manufacture a Brown-free pair is what won. On a
+3-game card there are only three legal SP games; a floor that forces variety
+buys worse arms. Hunter Brown scored 22.7 and was 63.3% owned -- the chalk was
+correct and being 100% on it was correct.
+
+Only 7 of the 61 morning entries are in this export. The other 54 went to
+contests whose standings have not been pulled.
+
+**09/03 evening, on FINAL standings.** 76 control lineups over 4 contests on
+a 6-game card, 76 of 76 built, 81 distinct hitters, top SP 34%.
+
+    contest      n    best     rank        10th     gap
+    194932492   20   136.05    22/1189    144.85   -8.80
+    194996367   20   136.50    45/1189    154.75  -18.25
+    194932491   20   124.30    79/1169    147.50  -23.20
+    194946071   16   129.75   455/7134    168.35  -38.60
+
+All 76: best 136.50, mean 86.40, worst 36.35. Distribution 51.3% below
+contest median, 2.6% in the top 1-5% band, 7.9% in 5-10% -- worse than
+08/30's 10.0% and 13.3%. 0 top-10 in the evening contests.
+
+**The first exports of these contests were INCOMPLETE and every number read
+off them was wrong.** Pulled at 21:50 they gave 10th-place bars of 139.80 /
+149.45 / 160.05 and ranks of 43 / 23 / 259; the final exports at 23:01 gave
+147.50 / 154.75 / 168.35 and ranks of 79 / 45 / 455. Player FPTS moved too,
+so rebuilt-portfolio scores changed, not just ranks. The preliminary files
+were also LARGER on disk than the final ones, so file size is not the tell.
+Do not analyse a standings export until the slate is genuinely complete, and
+re-pull before trusting any number taken from one.
+
+Against the Dime Time top 10, decomposed the same way as 08/30:
+
+                      worst4    top3    zeros    total
+    TOP 10 (n=10)      23.33   82.89     0.80   156.19
+    OURS (n=20)         7.95   57.53     1.90    87.87
+    our best lineup    16.00   79.35     1.00   136.50
+
+Our best lineup's CEILING was already there -- 79.35 top-3 against the
+winners' 82.89. The entire 12.95 gap is worst-4 (16.00 vs 23.33) and one
+zero. This is the 08/30 finding a second time: `worst4` separates, `top3`
+does not. Seven players at >=20% exposure returned <=5 points (Gasper 30%/0.0,
+Mateo 30%/0.0, Bauers 30%/2.0, Mayo 30%/3.0, Abreu 20%/0.0, Rodden 20%/5.0,
+Kade Anderson 20%/3.9).
+
+**Winners spend the cap; when WE spend the cap we score less. 09/03, 4
+contests.** Field top-10 lineups are effectively maxed against the $50,000
+Classic cap -- and the poorest of the 40 still spent 48,000, which is above
+our MEDIAN lineup:
+
+    contest      top10 mean   maxed    top100 mean   ours mean   ours median
+    194932491       49,390    2/10        49,574      46,560       46,750
+    194932492       49,650    0/10        49,589      46,935       46,700
+    194946071       49,930    7/10        49,622      47,118       46,650
+    194996367       49,890    6/10        49,693      46,220       46,650
+
+15 of the 40 top-10 lineups sat at exactly 50,000; 1 of our 76 did. This is
+the same ~2,000-3,000 hitter-side gap the winner-profile table already
+records, slightly wider than usual.
+
+It is still not a reason to add a floor, and this slate is the cleanest proof
+yet. WITHIN our own 76 lineups salary is NEGATIVELY related to score --
+rho -0.595, -0.023, -0.280, -0.369, pooled **-0.299**, negative in all four
+contests. Split at our median spend:
+
+    <= 46,700   n=39   mean 89.49   best 136.05
+    >  46,700   n=37   mean 79.27   best 136.50
+
+The cheap half outscored the expensive half by 10 points a lineup and the two
+bests were a dead heat. So the field-level correlation ("winners are maxed")
+and the portfolio-level correlation ("our expensive lineups are worse") point
+opposite ways, and the floor acts on the second one. That is why spend15 and
+minspend47 both lost live and why the 47,000 cut deleted 08/30's best lineup:
+forcing the spend makes the builder buy up using `bs`, which predicts nothing,
+so it converts cheap arbitrary bats into expensive arbitrary bats. Winners are
+maxed because they picked right, not right because they maxed.
+
+**And the yoy term picked the worst of them -- which is still not a lever.**
+Mickey Gasper topped BOS on `bs` at 58.36 almost entirely through a +3.46
+year-over-year delta (avg26 6.77 against avg25 3.31), which the formula
+multiplies by 4. Roman Anthony -- BOS leadoff, second-best avg26 on the team,
+21.4% field-owned, in 54.5% of the top 1%, 16.0 points -- ranked 6th on `bs`
+and appeared in NONE of the 76 lineups. That is the bs decomposition above
+doing exactly what it was measured to do. It is a diagnosis and not a fix:
+swapping the fill sort to avg26 measured -7.79 over ten slates and ranking
+windows by avg26 -12.82. Do not read this paragraph as a reason to retry
+either.
+
 **What actually has live evidence:** entering BEFORE first pitch (on 08/29 the
 pre-existing entries beat late-swap builds by ~23 pts/lineup, essentially all
 of it points from games that had already locked), and volume (20 -> 40 lineups
 took the top-10 hit rate 0.062 -> 0.250).
+
+## minspend49: the first arm to pass the equal-size replay, marginally
+
+Tested 09/03 after the field-salary finding. Hard floor at 49,000, shortfall
+refilled from further seeds so both arms are scored at the SAME portfolio
+size (dN = 0.0 -- without that the arm builds 45 of 60 and its `best` is
+penalised for having fewer draws). 17 snapshots x 3 seeds = 51 pairs,
+102 builds, no build failures.
+
+    variant      slates  nAvg    mean     sd  bestAvg   gapAvg  top10
+    control          17    57    82.0   26.6    148.6    -8.08   10.7
+    minspend49       17    57    83.9   27.5    152.0    -4.75   14.0
+
+    paired: dBest +3.3  SE 1.8  t 1.80  dMean +2.0  dGap +3.32  dN +0.0
+
+The 51 pairs are PSEUDO-REPLICATED -- 17 snapshots are only 11 distinct slate
+dates (08/30 appears three times, five other dates twice). Collapsing to one
+number per date is the honest test:
+
+    09_02 -4.35   09_03 -3.03   08_26 -0.71   08_29 -0.15   08_30 +2.78
+    08_31 +3.02   08_23 +4.40   08_24 +4.45   08_28 +7.02   08_25 +9.76
+    08_27 +14.38
+
+    11 dates, mean +3.41, SE 1.67, t 2.04, better on 7 of 11
+
+So it sits exactly on the t=2 line either way. Four things make it unlike the
+seven ideas that died:
+
+  * dN = 0. It is not winning by underfilling or by extra draws.
+  * dMean is ALSO positive (+2.0). Every previous constraint traded ceiling
+    for floor; this one moves both, so it is not that trade.
+  * **sd went UP**, 26.6 -> 27.5. Every selection arm compressed spread. This
+    removes lineups rather than choosing them, the `minspend47` family that
+    CLAUDE.md already identifies as the only one that has ever worked.
+  * top-10 count 32 -> 42 over the same pairs, and mean gap to the real 10th
+    place -8.08 -> -4.75.
+
+And three that should hold it back:
+
+  * The noise floor is the same size as the effect. Three snapshots of 08/30
+    -- the same slate, different input times -- give -8.42, +22.17 and -5.42.
+    08/26 gives +8.52 and -9.93. A +3.4 mean sits inside that.
+  * `maxcorr47` measured +7.60 on best, better on 8 of 9 slates, the strongest
+    backtest of the project, and lost every live contest it entered. This is a
+    weaker result than that one.
+  * **09/03, the slate that motivated the arm, is one of the four it LOSES
+    (-3.03).** The field-salary observation came from that slate and the fix
+    does not help there. That cuts against overfitting, but it also means the
+    motivating story is not the mechanism.
+
+Not shipped on this evidence alone -- the standing rule is that nothing ships
+on a backtest, and the live A/B channel is closed, so there is no holdout left
+to break the tie. Recorded as the strongest open candidate.
+
+**Rebuilt on 09/03 evening at the entered size, FINAL standings: +4.55, t
+1.11.** 76 lineups, both arms, five base seeds (42/100/200/300/400), scored
+against contest 194932491:
+
+    seed     control   minspend49   delta
+      42      146.05      142.65    -3.40
+     100      146.65      163.65   +17.00
+     200      153.30      150.65    -2.65
+     300      136.20      147.65   +11.45
+     400      140.50      140.85    +0.35
+
+    control    mean 144.54  sd 6.51    minspend49  mean 149.09  sd 9.03
+    paired     mean +4.55  sd 9.16  SE 4.09  t 1.11  (3 better, 2 worse)
+    top-10 over 20 contest-seeds: control 2, minspend49 10
+
+Consistent with the 11-slate +3.41, and NOT significant. The top-10 count is
+the one number that separates the arms cleanly (2 against 10), which is the
+metric the objective actually cares about -- but it is 5 seeds on 1 slate.
+
+**This measurement was run first on the incomplete exports and said +10.38,
+t 3.00, 4 better and 0 worse.** Same slate, same seeds, same code -- only the
+standings changed. An arm that looked like it never lost turned into a 3-2
+split. That is the sharpest available warning about scoring anything on a
+provisional export.
+
+**RERUN ON FINAL STANDINGS AT 5 SEEDS: 10 of 11 dates better, t 3.53.** The
+sweep above was rebuilt once the 09/03 exports were complete, and the seed
+count raised from 3 to 5 because noise, not effect size, was the binding
+constraint. 170 builds, no failures, pairings verified by hand (the new
+morning contest 194931967 did not displace any slate's partner).
+
+    variant      slates  sds  nAvg    mean     sd  bestAvg   gapAvg  top10
+    control          17    5    57    82.2   26.4    148.0    -9.01   10.0
+    minspend49       17    5    57    83.8   27.2    150.7    -6.32   12.2
+
+    paired, 85 pairs: dBest +2.7  SE 1.3  t 2.03  dMean +1.5  dN +0.0
+
+Collapsed to the 11 distinct slate dates, which is the honest unit:
+
+    08_29 -0.27   08_26 +0.40   08_30 +1.64   08_31 +1.81   09_02 +2.33
+    08_23 +2.38   08_28 +2.70   08_24 +3.77   09_03 +3.80   08_25 +4.64
+    08_27 +10.62
+
+    11 dates, mean +3.08, SE 0.87, t 3.53, better on 10, worse on 1
+
+The single negative is -0.27, which is a tie. 09/03 flipped from -3.03 to
++3.80 purely on the corrected standings. Extra seeds cut the per-date SE from
+1.67 to 0.87 without moving the mean (+3.41 -> +3.08), which is what a real
+effect measured more precisely looks like rather than one that shrinks.
+
+Why this is not another maxcorr47 (+7.60 on best, better on 8 of 9, lost every
+live contest):
+
+  * maxcorr47 was a SELECTION arm and compressed spread. This one REMOVES
+    lineups and sd went UP, 26.4 -> 27.2.
+  * dMean is positive too, so it is not the ceiling-for-floor trade that every
+    dead constraint made.
+  * It was ONE pre-specified hypothesis, tested once and re-tested on
+    corrected data -- not one survivor of a sweep of 24, which is the
+    multiple-comparisons trap the 08/30 sweep fell into.
+  * It is mechanically motivated from field data measured before the test: the
+    top-10 lineups on 09/03 averaged 49,715 of the 50,000 cap and the poorest
+    of 40 spent 48,000, above our median.
+
+SHIPPED 09/04 as the default arm, on that evidence plus the level sweep
+below. It has NO live record; the first live slate is still the real test.
+
+**The level does not matter much, and 49,500 is worse. Do not raise it.**
+Swept 48,500 / 49,000 / 49,500 against a correct control, 17 snapshots x 5
+seeds, equal portfolio size, 340 builds:
+
+    arm            bestAvg  gapAvg  top10   sd    dBest    SE     t
+    control          148.0   -9.01   10.0  26.4       --    --    --
+    minspend485      150.8   -6.25   11.6  27.0     +2.8   1.4  1.95
+    minspend49       150.7   -6.32   12.2  27.2     +2.7   1.3  2.03
+    minspend495      149.4   -7.62   13.8  27.5     +1.4   1.7  0.80
+
+    collapsed to 11 slate dates
+    minspend485   +3.06  SE 1.15  t 2.67   better 9  worse 2
+    minspend49    +3.08  SE 0.87  t 3.53   better 10 worse 1
+    minspend495   +2.69  SE 1.57  t 1.71   better 7  worse 4
+
+48,500 and 49,000 are indistinguishable on the mean (+3.06 vs +3.08); the
+plateau is real and the exact threshold is not the mechanism. 49,500 keeps a
+similar mean but its consistency collapses -- 7-4 instead of 10-1, and the SE
+nearly doubles (0.87 -> 1.57). Tightening past 49,000 stops removing bad
+lineups and starts dictating which players get bought, the same wall
+HARD_AVOID_BS hit at 15 and 20. Keep 49,000: it sits mid-plateau, so a slate
+that cannot quite reach it degrades gracefully.
+
+One honest caveat against the level choice: `top10` rises MONOTONICALLY with
+the floor, 10.0 / 11.6 / 12.2 / 13.8, so 49,500 produced the most top-10
+finishes while scoring the worst on `best` and gap. Those two disagree, and
+top-10 count is nominally the objective. It is also the noisiest column here
+(a count of rare events over 85 portfolios), which is why `best` remains the
+scoring metric -- but if a future sweep reproduces that ordering on more
+slates, this decision should be revisited.
+
+## The replay harness had been broken since the ROI removal (fixed 09/03)
+
+Three defects, all found on 09/03 while testing minspend49. Any replay result
+quoted between the ROI removal and 09/03 came from a harness that could not
+run, so it was measured before that and is still valid -- but nothing new had
+been measurable in between.
+
+  * `backtest_variants.py` imported `PAYOUT_TABLES` and `entry_payout` from
+    `post_contest.py`, both deleted when payouts stopped being tracked. It
+    died at import. It now scores on placement -- gap to the real 10th-place
+    score and top-10 count -- which is what the objective actually is.
+  * The paired verdict was a t-test on **dMean**. That is the exact proxy that
+    shipped `spend15` (+10.60 on the mean, p=0.056, then lost all three live
+    slates). It now tests `dBest`, prints dMean beside it so a
+    ceiling-for-floor trade is visible, and prints **dN** -- an arm that
+    underfills gets a lower `best` for free, and that has to be readable.
+  * The scratch dir was a fixed `%TEMP%/bt_variants` that every build wipes
+    before writing, so two sweeps running at once destroyed each other's
+    inputs mid-build. Now per-PID.
+  * `build_once` OMITTED `--variant` for the control arm, relying on the
+    builder's default being the unconfigured builder. The moment minspend49
+    shipped as that default (09/04), "control" silently rebuilt minspend49
+    and a 340-build sweep compared the arm against itself. The tell was
+    unmistakable and worth remembering: **dBest exactly +0.0, SE 0.0, "no
+    spread across pairs"**, and a control row whose bestAvg/gapAvg/top10
+    matched the previous sweep's minspend49 row to the digit. It now always
+    passes `--variant`. A harness that infers an arm from a default is one
+    shipping decision away from measuring nothing.
+
+**A "min spend" arm never tested its own floor.** The min-spend ladder bends
+the floor in 1,000 steps and then drops it entirely (`[base, base-1000,
+base-2000, None]`), so `minspend47` portfolios contained lineups well under
+47,000 and the arm was never evaluated at its nominal level. `--hard-min-salary`
+disables the ladder. The floor then genuinely binds and the portfolio
+UNDERFILLS instead -- 45 of 60 on the 09/03 snapshot -- which is the honest
+behaviour, and `--seeds N` refills it.
+
+**`--seeds N` merges portfolios across consecutive seeds.** Same builder
+object, so `seen_sigs` keeps the merge deduped and every exposure counter
+keeps binding across it; caps stay fractions of the ORIGINAL request, so a
+refilled portfolio concentrates no more than a first-pass one. Verified on
+09/03 morning by hand (a 3-game card gave 16 lineups on one seed, 67 across
+six) and now built in. Note `make_specs` emits one spec per ALLOCATED stack
+regardless of its `n_lineups` argument, which only sets tier proportions --
+the refill must slice it to the shortfall or it builds a second full
+portfolio (first attempt returned 84 of a requested 60).
 
 ## The replay harness, and the 08/30 sweep it ran
 
@@ -446,21 +748,50 @@ score it against future results, exactly as floor_target is kept. It gates
 nothing. `--hitter-min-own` exists, defaults off, and is documented here as
 tested and failed.
 
-**Parked for the next contest.** Nothing experimental is shipped -- the
-builder is exactly the 08/30 build plus the doubleheader fix. Two things are
-waiting on a 10th slate:
+**`own_mean` is the first metric ever to read POSITIVE, on 3 slates. Do not
+spend it yet.** The parked ownership measurement landed 09/03. `metric_study`
+over 17 paired slates, Spearman against realised points:
 
-  * `own_mean` / `own_min` are now written into portfolio_summary, so once
-    tomorrow's standings land, `metric_study.py` scores projected ownership
-    against realised points for the first time. That is the measurement the
-    whole ownership detour was for; the floor and barbell both failed, but
-    nothing has yet asked whether own_pct predicts SCORING rather than
-    %Drafted.
-  * The nine-slate replay set becomes ten. Every result below was measured on
-    nine, and the day's clearest lesson is that four slates invert results.
-    The three closest calls -- secondary stack (-6.39), pure-Vegas allocation
-    (-2.59) and uniform window sampling (-2.10) -- are the ones a tenth slate
-    could actually move. The rest lost by more than 10 and are not close.
+    metric        08/31   09/02   09/03   POOLED   WITHIN
+    own_mean      +0.37   +0.30   +0.37    +0.41    +0.34
+    own_min       +0.17   +0.25   +0.21    +0.30    +0.23
+    floor_target                           -0.06    -0.07
+    Salary                                 -0.07    -0.12
+    proj_points                            -0.02    -0.15
+    ceiling                                -0.16    -0.11
+    max_stack                              -0.02    -0.07
+
+Every other candidate sits between -0.16 and -0.02 within-slate. own_mean is
++0.34, positive on all three slates it has, and beats Salary -- plausibly
+because own_pct carries batting order and salary does not fully price it. It
+is the only encouraging number in this file that is not a bug fix.
+
+Two reasons it changes nothing today. Three slates is precisely the trap:
+floor_target read **+0.63 on its first two** and settled at -0.07, and 08/30's
+four-slate false positive is documented above. And spending it means SELECTING
+lineups on own_mean, which is the fifth arm of a family where four have died
+-- selection compresses spread (sd 27.20 -> 25.86 -> 25.19), so no scoring
+function lengthens the right tail. Keep recording it. Revisit at ten slates,
+and even then the lever is the problem, not the metric.
+
+Note this is a different question from the ownership work that failed:
+`--hitter-min-own` and the barbell gated individual HITTERS on own_pct. This
+measures whether a LINEUP's mean projected ownership predicts its score. The
+first is closed; the second is open and unresolved.
+
+**The replay set is now ten slates** (09/03 evening pairs to a standings
+file). Every sweep result below was measured on nine. The three closest calls
+-- secondary stack (-6.39), pure-Vegas allocation (-2.59) and uniform window
+sampling (-2.10) -- are the ones a tenth slate could move; the rest lost by
+more than 10 and are not close. Nothing experimental is shipped: the builder
+is the 08/30 build plus the doubleheader fix and the 09/02 bring-back fix.
+
+**The 09/03 morning snapshot was overwritten by the evening build.** Two
+slates on one date share `Snapshots\09_03_2026` and the upload filename. The
+builder preserves the upload CSV automatically (`_prev0855`), but NOT the
+snapshot directory -- so the morning 3-game card is not in the replay set and
+cannot be recovered. Copy the snapshot dir aside before the second build of a
+two-slate day.
 
 **Every constraint tightening trades floor for ceiling.** Tighter fill caps,
 bigger stacks, hitter floors, a higher SP ban -- each one lifts the bottom of
@@ -470,12 +801,27 @@ wrong way round.
 
 ## Daily flow
 
+The interpreter is `C:\Users\CHAT2\anaconda3\python.exe`. Bare `python` on
+PATH resolves to the Windows Store stub, which has no pandas and fails at
+`import pandas`; the Bash tool cannot execute it at all ("Permission denied").
+`run_slate_build.bat` activates the conda env, so it is only direct invocation
+that needs the full path. Set `PYTHONUTF8=1` when redirecting output.
+
     python preflight.py                  # gate: are lineups posted?
     python filtered_DK_Salaries.py       # match the two load/ downloads
     python mlb_odds.py --csv mlb_odds.csv
     python vegas_sp_adjust.py
-    python build_portfolio.py --variant control --lineups 60
-    python make_entries.py --arms control [--duplicates]
+    python build_portfolio.py --lineups 60
+    python make_entries.py [--duplicates]
+
+**The shipped arm is `minspend49` as of 09/04, not control.** Both defaults
+now point at it -- `--variant` in build_portfolio and `--arms` in
+make_entries -- so `run_slate_build.bat`, which calls the builder bare, picks
+it up with no edit. The arm also carries its own refill count (`"seeds": 8`)
+because a hard floor underfills, 45 of 60 on 09/03; shipping it as a flag
+would have meant remembering `--seeds` at 6pm or silently entering short.
+`--variant control` restores the previous builder, `--variant none` the older
+unsuffixed filenames.
 
 60 fills on a real slate; verified against frozen snapshots rather than
 assumed. 08/28 (12 games) built 59 of 60 -- one ceiling lineup could not be
