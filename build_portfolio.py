@@ -286,6 +286,29 @@ VARIANTS = {
     # "closer to where they sit" is the obvious next question -- but a floor
     # this tight starves construction, and the refill can only recover what
     # the pool can actually build.
+    # ---- bigger primary stacks, RETESTED --------------------------------
+    # Forcing 5-stacks measured -11.89 and 5,5,4 measured -26.00, but both
+    # predate the 09/03 harness fixes: the paired verdict then tested dMean,
+    # the proxy that shipped spend15, so a change trading mean for ceiling was
+    # scored backwards. 5,5,4 was also only 4 slates, and the set is now 12
+    # dates. Retested on top of minspend49 so the stack size is the only
+    # difference. 70% of top-10 lineups run a 5-stack against our 12.9%, and
+    # P(top10) across the 09/04 field rises 0.304% -> 0.517% from a 4- to a
+    # 5-stack.
+    "stack555": {"score": None, "top": 1, "min_total_salary": 49000,
+                 "hard_min_salary": True, "seeds": 8,
+                 "stack_sizes": (5, 5, 5)},
+    "stack554": {"score": None, "top": 1, "min_total_salary": 49000,
+                 "hard_min_salary": True, "seeds": 8,
+                 "stack_sizes": (5, 5, 4)},
+    # ---- pitcher on the stacked team ------------------------------------
+    # Built 09/05 from the 09/04 field study. Tested ON TOP of the shipped
+    # minspend49 so the comparison isolates the pairing, not the floor.
+    "spstack": {"score": None, "top": 1, "min_total_salary": 49000,
+                "hard_min_salary": True, "seeds": 8, "sp_with_stack": True},
+    # The same pairing WITHOUT the salary floor, to check the two do not
+    # simply overlap -- both spend up, and an effect could be double-counted.
+    "spstackonly": {"score": None, "top": 1, "sp_with_stack": True},
     "minspend485": {"score": None, "top": 1, "min_total_salary": 48500,
                     "hard_min_salary": True, "seeds": 8},
     "minspend495": {"score": None, "top": 1, "min_total_salary": 49500,
@@ -840,6 +863,8 @@ class Builder:
         # floor untestable. A hard floor underfills instead; multi-seed
         # merging is what refills it.
         self.hard_min_salary = False
+        # Prefer an SP who plays FOR the stacked team (see pick_sp_pair).
+        self.sp_with_stack = False
         self.hitter_min_avg26 = None
         self.fill_max_bo = None
         self.force_bringback = False
@@ -858,6 +883,40 @@ class Builder:
             avoid.add(self.opp_map[stack_t])
         elig = [s for _, s in self.sp_df.iterrows()
                 if self.sp_use[s["name"]] < self.caps[s["name"]] and s["opp"] not in avoid]
+        # ---- SP on the stack's OWN team -------------------------------
+        # Measured on 09/04 across the full 18,007-lineup field: lineups
+        # whose SP plays for the team they stack hit the top 10 at 0.801%
+        # against 0.309%, a 2.6x rate, while mean points are flat (93.72 vs
+        # 93.10). It buys nothing in the middle and only lengthens the right
+        # tail, which is the shape this objective wants. The mechanism is
+        # real rather than correlational: DK pays a pitcher a Win bonus, and
+        # his team scoring runs is what produces the win, so "the stack
+        # erupts" and "the pitcher wins" are the same event.
+        #
+        # 26.8% of top-10 lineups put six players on one team this way (five
+        # hitters plus that team's starter, legal because the >5 cap counts
+        # hitters only). We had built it ZERO times in 139 entries -- not by
+        # choice but by construction: the bring-back adds a bat from the
+        # opposing side, and `avoid` then bans every arm whose opp is that
+        # team, which is exactly the stack team's own starter. The two ideas
+        # are mutually exclusive per lineup, so this arm drops the bring-back
+        # rather than trying to hold both.
+        if self.sp_with_stack and not spec.get("bringback"):
+            own = [s for s in elig if s["team"] == stack_t]
+            if own:
+                others = [s for s in elig if s["team"] != stack_t]
+                rng.shuffle(own)
+                rng.shuffle(others)
+                key = lambda s: -(s["adj_blended"] + rng.uniform(0, 5))
+                own.sort(key=key)
+                others.sort(key=key)
+                pairs = self._form_pairs(own + others, PAIR_CAP,
+                                         self.sp_salary_cap)
+                pairs = [(a, b) for a, b in pairs
+                         if stack_t in (a["team"], b["team"])]
+                if pairs:
+                    return pairs
+                self.reject["no legal pair using the stack team's own SP"] += 1
         if spec["tier"] == "CONTRARIAN":
             pref = [s for s in elig if 10 <= s["adj_bs"] < 40]
         else:
@@ -1047,6 +1106,17 @@ class Builder:
             and (self.force_bringback
                  or (stack_t in self.vegas.index
                      and self.vegas.loc[stack_t, "game_total"] >= BRINGBACK_TOTAL)))
+        # A bring-back and an own-team SP cannot coexist: the bring-back bat
+        # comes from the opposing side, and pick_sp_pair then bans every arm
+        # whose opponent is that side -- which is the stack team's own
+        # starter. Give up the bring-back only when this team actually HAS a
+        # usable arm, so teams without one keep the existing behaviour.
+        if self.sp_with_stack and spec["bringback"]:
+            if any(s["team"] == stack_t
+                   and self.sp_use[s["name"]] < self.caps[s["name"]]
+                   for _, s in self.sp_df.iterrows()):
+                spec["bringback"] = False
+                self.reject["bring-back dropped for an own-team SP"] += 1
         pairs = self.pick_sp_pair(spec, rng)
         if not pairs:
             return None
@@ -1428,6 +1498,9 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--sp-with-stack", action="store_true",
+                    help="prefer an SP who plays for the stacked team, "
+                         "dropping that lineup's bring-back to allow it")
     ap.add_argument("--hard-min-salary", action="store_true",
                     help="do NOT bend --min-total-salary. The portfolio "
                          "underfills instead of quietly emitting lineups "
@@ -1541,6 +1614,7 @@ def main():
               else (args.min_total_salary or None))
     b.min_total_salary = mspend
     b.hard_min_salary = bool(cfg.get("hard_min_salary") or args.hard_min_salary)
+    b.sp_with_stack = bool(cfg.get("sp_with_stack") or args.sp_with_stack)
     havg = (cfg.get("hitter_min_avg26") if args.hitter_min_avg26 is None
             else (args.hitter_min_avg26 or None))
     b.hitter_min_avg26 = havg

@@ -652,6 +652,85 @@ top-10 count is nominally the objective. It is also the noisiest column here
 scoring metric -- but if a future sweep reproduces that ordering on more
 slates, this decision should be revisited.
 
+## Pitcher-on-the-stack: a real field edge that does NOT survive forcing
+
+Found in the 09/04 winner study and killed by replay on 09/05. Worth keeping
+because the trap is the most common one here.
+
+Across the FULL 18,007-lineup field of seven contests -- not a winners-only
+slice, so not survivorship:
+
+    SP plays for the stacked team?   n        P(top10)   mean pts
+      yes                            3,121     0.801%     93.72
+      no                            14,886     0.309%     93.10
+
+2.6x the top-10 rate with the mean flat, which is exactly the shape this
+objective wants. 35.2% of top-10 lineups did it and 26.8% put SIX players on
+one team that way (five hitters plus that team's starter -- legal, because the
+>5 cap counts hitters only). **We had done it 0 times in 139 entries**, and
+not by choice: the bring-back takes a bat from the opposing side, and
+`pick_sp_pair` then bans every arm whose opp is that side -- which is the
+stack team's own starter. The two are mutually exclusive per lineup.
+
+Built as `--sp-with-stack` (drops that lineup's bring-back when the stack team
+has a usable arm). It works mechanically: SP-on-stack went 7.9% -> 57.1%.
+Replayed 20 snapshots x 5 seeds, equal size:
+
+    variant        bestAvg  gapAvg  top10   dBest   SE     t    dMean
+    control          146.2   -8.75   10.6      --    --    --      --
+    minspend49       150.1   -4.85   15.0    +3.9   1.2  3.15    +1.8
+    spstack          150.1   -4.83   11.2    +3.9   1.6  2.41    +3.1
+    spstackonly      147.6   -7.33    9.8    +1.4   1.6  0.89    -0.3
+
+    collapsed to 12 dates: spstackonly +0.02  SE 1.46  t 0.01  6/6
+                           spstack vs minspend49  +1.24  t 0.98  8/4
+
+**The pairing ALONE is exactly zero** (+0.02 over 12 dates, 6-6). Combined
+with the floor it adds nothing separable (t 0.98) and its bestAvg matches
+minspend49 to three digits. And it COSTS the objective's own metric: top-10
+count 15.0 -> 11.2, a 25% drop, while dMean rises +1.8 -> +3.1. Mean up,
+top-10s down, is the ceiling-for-floor signature.
+
+Why the field number misled: 0.801% is a property of lineups that HAPPENED to
+pair, chosen by people who liked one specific correlated game. Forcing the
+pairing points it at whatever team the allocator picked, satisfied through
+`bs`, which predicts nothing. Same failure as forcing 5-stacks and ranking
+windows by avg26. It also trades away the bring-back, one of the few rules
+with sound support. Kept behind `--sp-with-stack`, default off.
+
+## Forcing 5-stacks does NOT lose any more -- the old -11.89 was a harness bug
+
+The file said "force 5-stacks -11.89" and "5,5,4 -26.00" and treated stack
+size as closed. Both predate the 09/03 harness fixes, when the paired verdict
+t-tested **dMean** -- the proxy that shipped spend15 -- so a change trading
+mean for ceiling was scored backwards. 5,5,4 was also 4 slates, and the set is
+now 12 dates. Retested on top of minspend49, 20 snapshots x 5 seeds:
+
+    variant      bestAvg  gapAvg  top10    sd   dBest   SE     t    dMean
+    control        146.2   -8.75   10.6  25.4      --    --    --      --
+    minspend49     150.1   -4.85   15.0  26.1    +3.9   1.2  3.15    +1.8
+    stack555       151.0   -3.94   15.6  26.7    +4.8   1.6  2.98    +2.1
+    stack554       152.0   -2.99   16.2  27.0    +5.8   1.7  3.41    +2.0
+
+Every direction is right and it is NOT the usual trade: bestAvg up, gap to
+10th -4.85 -> -2.99, top-10 count UP 15.0 -> 16.2, sd UP 26.1 -> 27.0. So the
+original finding was an artifact, and the standing "every stack-profile change
+loses" claim is retired.
+
+**But against the arm it would replace it is a coin flip:**
+
+    stack554 vs minspend49  +1.62  SE 1.95  t 0.84  6 better, 6 worse
+    stack555 vs minspend49  +0.60  SE 2.03  t 0.30  6 better, 6 worse
+
+    stack554 per date: -6.44 -5.95 -3.76 -3.12 -2.56 -1.96
+                       +3.45 +4.86 +4.98 +6.02 +7.71 +16.26
+
+Dead even, mean carried by one date (08/23 +16.26), and consistency collapses
+against minspend49's 11/1 at SE 1.02 -- SE more than doubles to 2.30. 5,5,4
+beats 5,5,5, consistent with the CONTRARIAN tier being where diversity comes
+from. NOT shipped on this; minspend49 stays. Recorded as the strongest open
+candidate, being rerun at 10 seeds because noise, not effect size, is binding.
+
 ## The replay harness had been broken since the ROI removal (fixed 09/03)
 
 Three defects, all found on 09/03 while testing minspend49. Any replay result
@@ -719,13 +798,18 @@ Everything tried on 08/30, all reverted, all scored on `best`:
 
     change                                slates   avg delta   verdict
     any-N stack (ignore batting order)      9       -20.49     confirms current
-    5,5,4 bigger primary stacks             4       -26.00     no
+    5,5,4 bigger primary stacks             4       -26.00     RETRACTED*
     secondary 3-man stack                   9        -6.39     no
     window ranked by batting order          4       -16.50     no
     hitter floor avg26 >= 4.0               9        -2.28     no
     hitter floor avg26 >= 6.0               4       -21.71     no
     hitter min-salary 3000 / 3500           4    -10.03/-18.54 no
     HARD_AVOID_BS 0 / 5 / 15 / 20           9   -5.15/0/-21.05/-21.05  keep 10
+
+(*) 5,5,4 was 4 slates on the pre-09/03 harness. Retested 09/05 over 12 dates
+on the fixed one it reads +5.8 dBest, t 3.41, top-10 up. See "Forcing 5-stacks
+does NOT lose any more". Everything else in this table was scored on `best`
+and stands -- but any 4-slate row here is provisional by the rule above.
 
 **The consecutive stack is the one confirmed positive, and it is large.**
 Replacing contiguous batting-order windows with "any N off the team, best bs
@@ -776,7 +860,17 @@ and the mean rises too.
 **And yet every change pointed at that profile made things worse.** Force
 5-stacks -11.89, force 5,5,4 -14.54, hitter salary floor -10.03/-18.54, rank
 windows by avg26 -12.82, rank windows by batting order -16.50, allocate purely
-on Vegas implied -2.59. The reason is always the same: the constraint gets
+on Vegas implied -2.59.
+
+> **RETRACTED for the two stack-size entries, 09/05.** Both were measured on
+> the pre-09/03 harness, whose paired verdict t-tested dMean. Retested on the
+> fixed harness over 12 dates on top of minspend49, `stack554` reads **+5.8
+> dBest (t 3.41) with top-10 count UP 15.0 -> 16.2** -- see "Forcing 5-stacks
+> does NOT lose any more". It still does not beat minspend49 (t 0.84, 6-6), so
+> nothing shipped changed, but the claim that stack-profile changes always
+> lose is dead. The other four entries here stand; they were scored on `best`.
+
+The reason for the ones that stand is always the same: the constraint gets
 satisfied using OUR ranking, and our ranking is `bs`, which predicts nothing.
 Winners have five bats on the RIGHT team. We can force five bats; we cannot
 pick the team. The gap is team selection, and the only signal that predicts
