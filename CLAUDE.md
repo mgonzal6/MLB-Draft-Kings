@@ -728,8 +728,44 @@ loses" claim is retired.
 Dead even, mean carried by one date (08/23 +16.26), and consistency collapses
 against minspend49's 11/1 at SE 1.02 -- SE more than doubles to 2.30. 5,5,4
 beats 5,5,5, consistent with the CONTRARIAN tier being where diversity comes
-from. NOT shipped on this; minspend49 stays. Recorded as the strongest open
-candidate, being rerun at 10 seeds because noise, not effect size, is binding.
+from. NOT shipped on this; minspend49 stays.
+
+**Rerun at 10 seeds, 600 builds: the seed count was NOT the binding
+constraint.** The pre-registered test was whether stack554's per-date SE
+would tighten the way minspend49's did when its seeds went 3 -> 5 (1.67 ->
+0.87). It did not: 1.95 -> 1.75.
+
+    variant      bestAvg  gapAvg  top10    sd   dBest   SE     t    dMean
+    control        145.6   -9.35   10.6  25.3      --    --    --      --
+    minspend49     148.8   -6.11   12.9  26.1    +3.2   0.9  3.70    +1.8
+    stack554       151.6   -3.37   16.0  27.1    +6.0   1.1  5.22    +2.0
+
+Against CONTROL it is now the strongest arm ever measured here -- t 5.22 on
+200 pairs, gap to 10th -3.37 against -9.35, top-10 count 10.6 -> 16.0. Against
+minspend49, the arm it would actually replace:
+
+    12 dates, best    +1.91  SE 1.75  t 1.09   7 better, 5 worse
+    200 pairs, best   +2.74  SE 1.02  t 2.68   104/77
+    200 pairs, top10  +0.155 SE 0.065 t 2.40   44/28, 128 tied
+    12 dates, top10   +0.19  SE 0.16  t 1.22   4 better, 5 WORSE
+
+**The two levels disagree and the pooled one is pseudo-replication** -- 200
+pairs are 12 slate dates counted ten times, so its SE is a within-slate
+number and its t is inflated. Collapsed to dates, `best` is t 1.09 and the
+top-10 count is actually 4-5 AGAINST. minspend49 shipped at 10-of-11 dates,
+t 3.53; stack554 is 7-of-12 at t 1.09 with double the SE. Same standard,
+opposite answer.
+
+KEPT AS THE STANDING CANDIDATE, not shipped. If the effect is real it is a
+bigger one than minspend49's -- it beats control by nearly double -- but 12
+distinct slate dates cannot prove it and **more seeds provably cannot help**;
+the 10-seed rerun is the evidence for that. Only more slate DATES will.
+Re-test when the replay set reaches ~20 dates.
+
+The general lesson, which cost two sweeps to learn: **seeds buy precision
+within a slate, dates buy generalisation across slates.** When an arm's
+pooled t looks strong and its collapsed t does not, adding seeds widens the
+gap between the two numbers without moving the honest one.
 
 ## The replay harness had been broken since the ROI removal (fixed 09/03)
 
@@ -956,6 +992,30 @@ the portfolio and shortens the top. Seven ideas, seven dead, and this is the
 shape of all of them. `best` is the objective, so the trade is always the
 wrong way round.
 
+## Control is not better in small contests -- it is worst there
+
+Asked on 09/05 on the intuition that a small field suits the simpler builder.
+The replay set spans 475 to 7,134 entries; splitting the 5-seed sweep by
+field size, dBest vs control and top-10 count per portfolio:
+
+    field    pairs |  mspend  stack554 stack555 |  ctrl  mspend  st554
+    <1k        30  |  +5.68    +8.71    +6.88   |  0.13   0.53   0.60
+    1-2k       50  |  +2.16    +2.94    +2.85   |  0.90   1.00   1.04
+    2-4k       15  |  +3.89    +5.09    +4.68   |  0.27   0.60   0.73
+    4k+         5  | +10.62   +18.33   +12.40   |  0.00   0.00   0.00
+
+Control loses in every bucket, and sub-1k is where its top-10 rate is worst
+relative to the arms: 0.13 per portfolio against 0.53. (The 4k+ cell is 5
+pairs from one contest -- ignore it.)
+
+The live case is cleaner than the table. 09/04's only top-10 was the
+890-entry contest, bar 143.20; control rebuilt on that snapshot across five
+seeds produced best lineups of 134.05 / 136.60 / 141.00 / 127.80 / 123.40 --
+**its ceiling never reached the bar from any draw**. There is a mechanism: a
+small field has a lower 10th-place bar, so converting depends on the best
+lineup clearing a reachable number, and control's ~3,000 of unspent salary
+caps exactly that. Small contests are where the floor matters MOST, not least.
+
 ## Daily flow
 
 The interpreter is `C:\Users\CHAT2\anaconda3\python.exe`. Bare `python` on
@@ -1023,6 +1083,29 @@ in-flight patch -- uniform window sampling, `randrange(0, len(wins))` -- that
 was about to be reverted. It measured -2.10 on best and failed the audit
 outright on one slate. Restored in 1746704. While a sweep is running the
 working tree is a scratch surface, not a state worth committing.
+
+**A 2-GAME CARD BUILDS ZERO LINEUPS ON THE DEFAULT PATH. Use `--cash 0`.**
+09/05, 2 games / 4 teams / 36 batters, everything confirmed. The build
+returned 0 lineups and then CRASHED writing the empty portfolio
+(`ValueError: Length mismatch: Expected axis has 0 elements` at `up.columns =
+cols`). Control returned 0 as well, so this is the slate rule, not the arm.
+
+The mechanism: `SMALL_SLATE_GAMES = 4` routes a <=4-game card entirely
+through `try_build_cash`, which enforces `CASH_MIN_SPEND = 48000`. With two
+games the SP pair opposes two of the four teams, so all 8 hitters must come
+from the REMAINING TWO -- and that pool cannot reach 48,000 at legal
+positions. All 16,000 attempts failed "no valid construction".
+
+`--cash 0` forces the GPP path and it builds: 9 lineups minspend49, 8
+control. Nine is the slate's true ceiling -- `--lineups 120` also returned
+exactly 9, so unlike 08/29 the caps are NOT binding and asking for more does
+not help. Fill the rest with `make_entries.py --duplicates` and accept that
+39 entries are 9 distinct shots.
+
+Not fixed in code: the small-slate threshold should probably fall to 3 games,
+or CASH_MIN_SPEND should scale with the number of eligible hitter teams. Left
+alone because a 2-game card is rare and the workaround is one flag -- but the
+CRASH on an empty portfolio is a real defect worth fixing whenever touched.
 
 **Thin slates cap the portfolio.** A 3-game card had 3 of 8 pitchers clear
 HARD_AVOID_BS=10, covering 2 of 3 games, so the builder capped itself at 10
