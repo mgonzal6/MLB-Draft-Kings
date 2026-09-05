@@ -264,8 +264,9 @@ mechanism for retiring control turned out to be the replay harness rather
 than a live split: equal portfolio size, all slates, scored on `best`, better
 on 10 of 11 slate dates at t 3.53. Note what that means for this table -- the
 live head-to-head record below belongs to a builder that is no longer the
-shipping one, and `minspend49` has NO live record at all. Its first live
-slate is the real test, and one slate will not settle it either way.
+shipping one. `minspend49` has ONE live slate, 09/04 -- it beat control by
++7.30 on 5 seeds and took the only top-10 available, on a night the portfolio
+was otherwise poor. One slate settles nothing either way.
 
 The 08/29 numbers were restated on 08/30 against the full standings exports;
 the old ones (71.4/69.2 vs 66.0/67.4) were means of `control_live` (2 entries)
@@ -375,6 +376,64 @@ so rebuilt-portfolio scores changed, not just ranks. The preliminary files
 were also LARGER on disk than the final ones, so file size is not the tell.
 Do not analyse a standings export until the slate is genuinely complete, and
 re-pull before trusting any number taken from one.
+
+**09/04: FIRST LIVE `minspend49` SLATE. It beat control and the night was
+still poor.** 12 games / 24 teams, 140 lineups over 7 contests, 140 of 140
+built, salary mean 49,509. Exports pulled 01:22 and NOT yet re-pulled, so by
+the rule directly above these numbers are provisional.
+
+    contest       n    best     rank        10th      gap
+    194990692    20   148.45      8/890    143.20    +5.25   <- top 10
+    194990639    20   122.85     78/1189   144.85   -22.00
+    194990693    20   126.05     68/952    152.35   -26.30
+    194990641    20   132.55    143/3567   161.80   -29.25
+    194990640    20   127.55    198/3567   158.80   -31.25
+    194990694    20   113.75    225/1430   150.35   -36.60
+    194992516    20   119.55    748/7134   163.00   -43.45
+
+All 140: best 148.45, mean 86.47, worst 45.35. **65.7% of entries finished
+below their contest median -- the worst distribution recorded** (09/03 was
+51.3%, 08/30 50%). Only 2 of 140 reached the top 5%. One top-10 finish, and
+it needed the softest bar on the card: 148.45 would have missed in all six
+other contests.
+
+Rebuilt control on the SAME snapshot (scratches already removed), 5 seeds,
+140 lineups each:
+
+    seed     control   minspend49   delta
+      42      134.05      148.45   +14.40
+     100      136.60      129.45    -7.15
+     200      141.00      141.00    +0.00
+     300      127.80      138.30   +10.50
+     400      123.40      142.15   +18.75
+
+    control mean 132.57 sd 7.01   minspend49 mean 139.87 sd 6.91
+    paired +7.30  SE 4.76  t 1.53  (3 better, 1 worse, 1 tied)
+    top-10: control 0 on ALL FIVE seeds, minspend49 2
+
+Larger than the +3.08 backtest and still not significant, which is what a
+5-seed single slate can say. The decisive column is top-10: control's best in
+ANY seed was 141.00, below the 143.20 bar of the only winnable contest, so
+control goes 0-for-7 on this slate from every draw. The finish is attributable
+to the arm, not to which contest a lineup happened to land in.
+
+**Spread did NOT collapse -- that first read was a cross-slate error.**
+Tonight's portfolio sd of 18.16 was compared against 09/03's 23.71, which
+measures slate difficulty, not the arm. Within this slate against control the
+realised per-portfolio sd is 18.86 control vs 19.30 minspend49, averaged over
+the same five seeds: spread went UP, the same direction as the replay's
+26.4 -> 27.2. When checking whether an arm compresses spread, compare arms on
+one slate, never one slate to another.
+
+**Two hitters were scratched by hand and the feed never caught up.** Patrick
+Bailey and Nathaniel Lowe (both CLE, game 1 of a doubleheader) were still
+`confirmed=Y` in the 16:00 lineups download, and were in 8 roster spots of the
+16:03 build. Removed from `Filtered_Lineups.csv` by hand -- all three rows,
+including Bailey's unconfirmed game-2 row, so the doubleheader dedup could not
+reintroduce him. That is the THIRD hand scratch in five days (Kepler 08/31,
+Amador 09/01, these two 09/04), each time with the feed wrong and the user
+right. The `Starting` column cross-check described above was judged too rare
+to build; three occurrences in five days is no longer rare.
 
 Against the Dime Time top 10, decomposed the same way as 08/30:
 
@@ -556,7 +615,11 @@ live contest):
     of 40 spent 48,000, above our median.
 
 SHIPPED 09/04 as the default arm, on that evidence plus the level sweep
-below. It has NO live record; the first live slate is still the real test.
+below. **One live slate so far, 09/04:** +7.30 over control across 5 seeds
+(t 1.53) on the same snapshot, and the only top-10 finish control could not
+have reached from any draw. Directionally consistent with the backtest and
+nowhere near settling it -- and the slate was still a bad one, 65.7% of
+entries below their contest median.
 
 **The level does not matter much, and 49,500 is worse. Do not raise it.**
 Swept 48,500 / 49,000 / 49,500 against a correct control, 17 snapshots x 5
