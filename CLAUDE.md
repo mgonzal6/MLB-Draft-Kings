@@ -766,6 +766,35 @@ top-10 count is actually 4-5 AGAINST. minspend49 shipped at 10-of-11 dates,
 t 3.53; stack554 is 7-of-12 at t 1.09 with double the SE. Same standard,
 opposite answer.
 
+**09/06 IS A `stack554` SLATE, run explicitly, not shipped.** Decided 09/05
+for a 9-game card. The reasoning: the two arms are indistinguishable on the
+replay (t 1.09, 7-5), so the tiebreaker is information -- minspend49 has three
+live slates and stack554 has none, and only more slate DATES can settle it,
+which is exactly what a live slate adds. Downside is bounded because both beat
+control by a wide margin (t 5.22 vs 3.70).
+
+Structural test on that slate's projected lineups, 60 lineups each:
+
+    arm            n   salary  maxStk   5stk%  distinct hitters  topSP%  teams
+    minspend49    60   49,575   4.12    21.7%       102            35%   4.52
+    stack554      60   49,535   4.85    85.0%       109            35%   3.97
+    field top-10                4.44    70.0%                            3.47
+
+minspend49 badly undershoots the winner profile; stack554 overshoots it. The
+concentration cost that would be expected did NOT appear -- stack554 used MORE
+distinct hitters (109 vs 102) at identical top-SP exposure, because forcing
+bigger stacks spreads the build across more teams' bats rather than fewer.
+
+**`make_entries.py --arms` defaults to minspend49 and will NOT find a
+stack554 upload.** Both flags have to be passed or the entries file silently
+fills from the wrong (or no) portfolio:
+
+    python build_portfolio.py --variant stack554 --lineups N
+    python make_entries.py --arms stack554
+
+Kept explicit rather than switching the default on purpose: a rushed rebuild
+near lock calls the builder bare, and the default must not be an experiment.
+
 KEPT AS THE STANDING CANDIDATE, not shipped. If the effect is real it is a
 bigger one than minspend49's -- it beats control by nearly double -- but 12
 distinct slate dates cannot prove it and **more seeds provably cannot help**;
