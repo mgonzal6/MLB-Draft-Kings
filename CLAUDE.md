@@ -615,11 +615,21 @@ live contest):
     of 40 spent 48,000, above our median.
 
 SHIPPED 09/04 as the default arm, on that evidence plus the level sweep
-below. **One live slate so far, 09/04:** +7.30 over control across 5 seeds
-(t 1.53) on the same snapshot, and the only top-10 finish control could not
-have reached from any draw. Directionally consistent with the backtest and
-nowhere near settling it -- and the slate was still a bad one, 65.7% of
-entries below their contest median.
+below. **Live record so far, 3 slates:**
+
+  * 09/04 (12 games): +7.30 over control across 5 seeds (t 1.53) on the same
+    snapshot, and the only top-10 finish control could not have reached from
+    any draw. The slate was otherwise bad -- 65.7% of entries below their
+    contest median.
+  * 09/05 early (2 games): rank 4 and rank 6 of 1,189, gaps +5.00 and +1.00.
+    Verified 9-of-9 lineup-id match, so builder output with no hand edits.
+  * 09/05 night (2 games): rank 7 of 1,189, gap +0.40 -- but built with
+    `--hard-avoid-bs -999`, so it is NOT a clean test of the shipped config.
+
+Three top-10 finishes in three slates after twelve contests without one.
+Encouraging and still not decisive: two of the three were 2-game cards where
+the portfolio was 9-12 distinct lineups, and the deciding lineup was a single
+construction entered 2-3x. Control has no live record on these slates at all.
 
 **The level does not matter much, and 49,500 is worse. Do not raise it.**
 Swept 48,500 / 49,000 / 49,500 against a correct control, 17 snapshots x 5
@@ -1083,6 +1093,61 @@ in-flight patch -- uniform window sampling, `randrange(0, len(wins))` -- that
 was about to be reverted. It measured -2.10 on best and failed the audit
 outright on one slate. Restored in 1746704. While a sweep is running the
 working tree is a scratch surface, not a state worth committing.
+
+**09/05 WAS THE BEST DAY RECORDED: 3 top-10 finishes in 4 contests.** Two
+2-game cards, both `minspend49`, 79 entries. NOTE these exports were pulled
+~20 min after the late games ended and have NOT been re-pulled -- by the
+09/03 rule the +0.40 in particular could move.
+
+    contest       n    best     rank        10th      gap   slate
+    195058895    20   134.75      4/1189   129.75    +5.00   early
+    195058896    19   134.75      6/1189   133.75    +1.00   early
+    195060012    20   137.85      7/1189   137.45    +0.40   night
+    195062373    20   131.45     30/2330   137.85    -6.40   night
+
+The one miss had the highest bar and the largest field. Night portfolio mean
+103.52 and median percentile 10.7% in the Dime Time -- half our entries there
+finished in the top 11%, the best distribution recorded.
+
+**Count DISTINCT lineups, not entries, when duplicating.** "2 of 20" and "3 of
+20 in the top 10" were ONE lineup entered 2x and 3x (DupCount in
+post_entries). Four top-10 ENTRIES on the day, three top-10 LINEUPS, and each
+contest's was a single construction. Duplicates pay independently but are not
+independent draws.
+
+**A banned arm was the best pitcher on the slate, for the 3rd time in 12.**
+09/05 night: Jeffrey Springs, `adj_bs 5.57`, banned by HARD_AVOID_BS=10,
+scored **29.35 -- the highest of the four SPs -- at 19.7% ownership** against
+Glasnow's 73.1% and Kirby's 57.6%. Splitting the 12 entered lineups:
+
+    with Springs    n=6   mean 125.82   best 137.85   cleared the bar: 1
+    without         n=6   mean  79.67   best 108.70   cleared the bar: 0
+
+The top-10 lineup WAS a Springs lineup. With the ban left on, this card builds
+2 lineups (only 2 legal cross-game SP pairs survive), neither with Springs,
+ceiling ~108.70 against a 137.45 bar -- a guaranteed miss.
+
+This does NOT reopen the level. The sweep still stands: 0 cost -5.15 and 15/20
+cost -21.05 over 9 normal slates, and banned arms average 10.91 pts/start
+against 13.42. What it establishes is narrower and operational: **on a card
+where the ban removes legal SP PAIRS rather than merely disfavouring an arm,
+lift it.** `--hard-avoid-bs` now exists for exactly that, defaults to 10, and
+prints a warning when overridden. Check the legal-pair count before the seed
+count on any <=3-game card.
+
+**Seeds only help once the SP pair pool is wide enough.** Same day, same flag,
+opposite answers -- replayed against the real standings:
+
+    early slate   seeds 8 -> 9 lineups     seeds 40 -> 9 lineups   (identical
+                  best 134.75, ranks 4 and 6 either way)
+    night slate   seeds 8 -> 7 lineups     seeds 40 -> 12 lineups
+
+The early card had all 4 arms eligible, so 4 legal pairs, and the binding
+constraint was the DEDUP rule (2+ different players from every existing
+lineup) -- more RNG paths cannot get past that, and seeds 9-40 found nothing.
+The night card was pair-starved until the ban came off, and only then did
+extra seeds have anywhere to go. Diagnose which wall you are against before
+spending time on either.
 
 **A 2-GAME CARD BUILDS ZERO LINEUPS ON THE DEFAULT PATH. Use `--cash 0`.**
 09/05, 2 games / 4 teams / 36 batters, everything confirmed. The build

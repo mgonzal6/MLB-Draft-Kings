@@ -1498,6 +1498,14 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--hard-avoid-bs", type=float, default=None,
+                    help="SP adj_bs below this gets zero exposure (default "
+                         "10). Swept over 9 normal slates: 0 cost -5.15 and "
+                         "15/20 cost -21.05, so DO NOT change it on a normal "
+                         "card. It exists for thin slates, where the ban can "
+                         "remove the only legal SP pairs -- on the 2-game "
+                         "09/05 night card it cut the portfolio from 7 "
+                         "lineups to 2")
     ap.add_argument("--sp-with-stack", action="store_true",
                     help="prefer an SP who plays for the stacked team, "
                          "dropping that lineup's bring-back to allow it")
@@ -1525,6 +1533,13 @@ def main():
     # tests `args.variant` for None, so normalise here and nothing else moves.
     if args.variant == "none":
         args.variant = None
+    # build_sp_pool is module-level, so the ban level is a global rather than
+    # builder state. Only main() ever writes it.
+    if args.hard_avoid_bs is not None:
+        global HARD_AVOID_BS
+        HARD_AVOID_BS = args.hard_avoid_bs
+        print(f"HARD_AVOID_BS overridden to {HARD_AVOID_BS} "
+              f"(default 10 -- only justified on a thin slate)")
     if getattr(args, "allow_unconfirmed", False):
         slate_io.set_allow_unconfirmed(True)
     if args.selftest:
