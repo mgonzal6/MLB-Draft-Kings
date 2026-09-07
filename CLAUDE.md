@@ -785,6 +785,25 @@ concentration cost that would be expected did NOT appear -- stack554 used MORE
 distinct hitters (109 vs 102) at identical top-SP exposure, because forcing
 bigger stacks spreads the build across more teams' bats rather than fewer.
 
+**`stack554` IS A BIG-SLATE ARM. Do NOT use it on <=3 games.** Replayed on
+09/05 night (2 games) against the real standings, both arms at 20 lineups /
+6 seeds with the same `--cash 0 --hard-avoid-bs -999`:
+
+    arm          distinct   best      rank        gap        top10   mean
+    minspend49       7     131.85    27 / 28   -5.60/-6.00     0     99.16
+    stack554         5     120.85    68 / 107 -16.60/-17.00    0    102.63
+
+Five distinct lineups instead of seven and `best` 11 points lower, while the
+MEAN rises -- the ceiling-for-floor trade, on the metric that matters least.
+The mechanism: on a 2-game card the SP pair bans two of the four teams, so all
+8 hitters come from 2 teams; forcing a 5-stack pins 5 of 8 slots to one of
+them and leaves 3 from the other, collapsing both the legal constructions and
+the dedup space. On 9 games there are 18 teams and the same constraint costs
+nothing -- it filled 60/60 with MORE distinct hitters than minspend49.
+
+So the 09/06 decision below is specific to a 9-game card and does not
+generalise. `minspend49` stays the arm on thin slates.
+
 **`make_entries.py --arms` defaults to minspend49 and will NOT find a
 stack554 upload.** Both flags have to be passed or the entries file silently
 fills from the wrong (or no) portfolio:
@@ -805,6 +824,163 @@ The general lesson, which cost two sweeps to learn: **seeds buy precision
 within a slate, dates buy generalisation across slates.** When an arm's
 pooled t looks strong and its collapsed t does not, adding seeds widens the
 gap between the two numbers without moving the honest one.
+
+## STACK SIZE IS SETTLED IN BOTH DIRECTIONS. 5,4,3 stays.
+
+Swept 09/07 on the fixed harness (23 slates, `--cash 0` fallback, parallel),
+every arm on top of minspend49 so stack size is the only difference:
+
+    stack sizes        bestAvg  gapAvg  top10    sd    vs control
+    4,3,3 stack433       142.1  -10.75    9.0  24.4   -0.9  t -0.46
+    4,4,3 stack443       146.5   -6.30   17.3  25.5   +3.6  t  1.76
+    5,4,3 SHIPPED        148.2   -4.61   18.7  26.0   +5.2  t  3.09
+    5,5,4 stack554       152.0   -2.99   16.2  27.0   +5.8  t  3.41
+
+**`sd` falls monotonically as stacks shrink -- 27.0 / 26.0 / 25.5 / 24.4 --
+and so does everything else.** Smaller stacks really do cut variance,
+including catastrophic busts (09/06 produced a -0.10 lineup that was five PIT
+bats against a shutout), but they cut the ceiling by more. That is the
+floor-for-ceiling trade this file keeps finding, arriving from the OPPOSITE
+direction for once: not tightening a constraint, but loosening concentration.
+
+The shipped 5,4,3 has the best top-10 count of all four despite stack554
+having a higher bestAvg -- the same `best` vs top10 disagreement seen in the
+salary-floor sweep.
+
+**stack554 vs minspend49, re-measured on the fixed harness: a dead heat.**
+23 slates x 5 seeds, collapsed to the 14 distinct dates:
+
+    best    +0.18  SE 2.17  t  0.08   7 better, 7 worse
+    top10   -0.05  SE 0.21  t -0.25   4 better, 5 worse
+
+    per-date: -18.02 -6.44 -5.95 -3.76 -3.12 -2.56 -1.96
+              +0.98 +3.45 +4.86 +4.98 +6.02 +7.71 +16.26
+
+Earlier readings were +1.62 (t 0.84, 12 dates) and +1.91 (t 1.09). Adding two
+dates took it to +0.18. The date that moved it is **09/06 at -18.02, the worst
+of the 14 -- the slate stack554 actually ran live, now in the replay set.**
+Both arms still beat control decisively (t 3.09 and 2.97); they just cannot be
+told apart from each other.
+
+Note the per-date spread: -18.02 to +16.26. Same picture as the team study --
+which team erupted dominates, and construction is second-order noise on top.
+
+**KEEP minspend49.** Not because it won, but because a dead heat is no reason
+to switch off an arm with three live slates and three top-10 finishes onto one
+whose only live slate went 0-for-6. When the measurement cannot separate two
+arms, the live record is the tiebreaker.
+
+## Can we pick the team to stack? Measured: barely, and that is the ceiling
+
+384 team-slates over 24 slates. Predictor from the frozen snapshot, target the
+realised sum of that team's TOP 5 hitters -- what a 5-stack actually captures.
+Within-slate Spearman, because "which team on THIS card" is the only
+comparison the builder makes:
+
+    metric      WITHIN    worst    positive on
+    implied    +0.130   -0.327     15 of 22
+    gtot       +0.099   -0.426     14 of 22
+    sal        +0.066   -0.343     17 of 22
+    opp_impl   -0.000   -0.594     12 of 22
+    avg26      -0.005   -0.371     10 of 22
+
+`implied_total`, already the input to `allocate_stacks`, is the best available
+signal and it is weak -- negative on 7 of 22 slates. In concrete terms:
+
+    the highest-implied team was...      random baseline (~16 teams)
+      the best stack       9.1%              6%
+      in the top 3        27.3%             19%
+      in the top 5        45.5%             31%
+      in the BOTTOM HALF  54.5%
+
+Better than chance, and the team Vegas likes most still lands in the bottom
+half more often than not.
+
+The other candidates are EXHAUSTED, not untested. Opposing SP quality reads
+exactly 0.000 -- Vegas prices the starter into the line, so you cannot beat
+the line with an input it contains. Team avg26 is -0.005, the team-level echo
+of `bs` predicting nothing. Weather is inside the Vegas number too. Salary is
++0.066 and the most CONSISTENT (17 of 22) but weaker and largely redundant.
+
+09/06 is the illustration: TEX appeared in 31 of 56 top-10 lineups and no
+available signal flagged it. The field found it by covering every team.
+
+**So the leverage is not better team selection -- it is covering more teams.**
+And the stack-size sweep above shows we cannot buy that coverage by shrinking
+stacks either, because the ceiling falls faster than the variance. Both routes
+around the team-selection problem are now closed.
+
+## Seed blocking: a well-shaped idea that measured WORSE
+
+User's idea, 09/06: rotate the RNG seed every N lineups instead of holding one
+seed for the whole portfolio. The diagnosis behind it was correct -- the same
+arm on the same 09/06 snapshot gave `best` of 131.20 / 151.60 / 161.20 across
+three seeds, a 30-point swing a single-seed portfolio is fully exposed to. And
+each spec gets exactly ONE attempt per seed, so a poor RNG path on the slate's
+best stack is never revisited.
+
+Built as `--seed-block N` / `seedblk10` / `seedblk20`, on top of minspend49.
+The spec list is deliberately untouched, so the team allocation is NOT thinned
+-- every team still gets its lineups, just built under different RNG paths.
+21 slates x 3 seeds:
+
+    variant      bestAvg  gapAvg  top10    sd   dBest   SE     t    dMean
+    control        146.5   -8.11   11.0  25.6      --    --    --      --
+    minspend49     152.2   -2.39   18.7  26.8    +5.7   1.8  3.20    +2.4
+    seedblk10      149.3   -5.34   16.0  26.3    +2.8   2.3  1.19    +1.9
+    seedblk20      150.2   -4.39   16.3  26.5    +3.7   2.1  1.82    +2.4
+
+**Worse at both block sizes.** Against minspend49, seedblk20 loses 2.0 on
+bestAvg, 2.0 on gap, and takes top-10 count 18.7 -> 16.3; seedblk10 is worse
+still. Both fall to "not separable from control" while plain minspend49 sits
+at t 3.20.
+
+Why the mechanism backfires: each block builds under exposure counters and
+seen_sigs already set by earlier blocks, so later blocks work in a
+progressively MORE constrained space than a single seed ever faces. You trade
+one clean exploration of every spec for several partial ones, and that costs
+more than the poor-RNG-path problem it was meant to fix. Monotonic in block
+size (10 worse than 20) is the tell: smaller blocks mean more re-rolls and
+more of the penalty.
+
+Kept behind `--seed-block`, default 0 (off). Worth noting it is NOT in the
+selection family that killed five arms -- it never ranks lineups -- which is
+why it was worth testing at all.
+
+## The harness runs builds in PARALLEL now, and silently dropped 3 slates
+
+Two fixes on 09/06.
+
+**Parallelism.** `backtest_variants.py` ran builds one at a time via
+subprocess.run and used ~15% of an 8-core machine; 7 cores sat idle for entire
+sweeps. It now submits every (snapshot, arm, seed) build to a
+ThreadPoolExecutor (`--jobs`, default 6) and scores afterwards. Builds are
+independent subprocesses and subprocess.run releases the GIL, so this is a
+pure speedup -- **verified by rerunning a sweep and matching the sequential
+per-slate numbers digit for digit.** ~84% CPU, and a 288-build sweep runs in
+~15 min instead of ~70. Each task gets its OWN scratch dir; sharing one would
+reproduce the wipe-each-other bug at build level.
+
+Two consequences worth knowing. Progress output now lands at the END, because
+all builds finish before scoring -- a stdout counter every 10% was added,
+since `tick()` is stderr-only and silences itself when redirected, so a
+backgrounded sweep printed nothing at all. And the parallel run is CPU-bound,
+so do not start a second sweep alongside it.
+
+**The 2-game slates were dropping silently.** 36 "build failed" lines on the
+09/06 sweep, exactly 9 per arm = 3 snapshots x 3 seeds x 4 arms. Not a
+parallelism bug -- it is the `CASH_MIN_SPEND` failure documented below: a
+<=4-game card routes through try_build_cash, and on 2 games the SP pair bans
+two of four teams so all 8 hitters must come from the remaining two, which
+cannot reach 48,000. Production works around it by hand with `--cash 0`; the
+harness now retries the same way, but ONLY on total failure, so 3- and 4-game
+cards that build fine keep their cash-style path and stay comparable with
+earlier sweeps.
+
+The replay set had quietly shrunk from 24 snapshots to 21 without saying so.
+**Always read the build-failure count before the results table** -- an arm
+comparison over a silently reduced slate set is exactly the four-slate trap
+this file warns about, arriving through the back door.
 
 ## The replay harness had been broken since the ROI removal (fixed 09/03)
 

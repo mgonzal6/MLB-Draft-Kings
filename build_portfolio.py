@@ -286,6 +286,37 @@ VARIANTS = {
     # "closer to where they sit" is the obvious next question -- but a floor
     # this tight starves construction, and the refill can only recover what
     # the pool can actually build.
+    # ---- SMALLER primary stacks, the opposite of stack554 ----------------
+    # User's idea, 09/07, and better motivated than stack554 was. The team
+    # study over 384 team-slates found implied_total predicts a team's top-5
+    # output at only +0.130 within-slate, and the highest-implied team lands
+    # in the BOTTOM HALF of realised output 54.5% of the time. When the edge
+    # in picking the team is that thin, five bats on one guess is a large bet
+    # on a near-coin-flip -- 09/06 morning produced a -0.10 lineup that was
+    # five PIT bats against a shutout. A 4-man primary spreads the same 8
+    # hitter slots over more teams, buying coverage of an unpredictable event
+    # instead of doubling down on a weak prediction.
+    #
+    # Cuts against it: whole-field P(top10) rises with stack size (0.304% for
+    # a 4-stack, 0.517% for a 5-stack). This measures which effect dominates
+    # for US, given we cannot pick the team.
+    "stack443": {"score": None, "top": 1, "min_total_salary": 49000,
+                 "hard_min_salary": True, "seeds": 8,
+                 "stack_sizes": (4, 4, 3)},
+    "stack433": {"score": None, "top": 1, "min_total_salary": 49000,
+                 "hard_min_salary": True, "seeds": 8,
+                 "stack_sizes": (4, 3, 3)},
+    # ---- rotate the RNG path as the portfolio fills ----------------------
+    # User's idea, 09/06: run a different seed every N lineups rather than one
+    # seed for all of them. Each spec gets exactly one attempt per seed -- the
+    # first valid construction wins -- so a single-seed portfolio explores
+    # every spec once and a poor RNG path on the slate's best stack is never
+    # revisited. Blocking re-rolls construction without thinning the
+    # allocation. Tested at 10 and 20 on top of the shipped minspend49.
+    "seedblk10": {"score": None, "top": 1, "min_total_salary": 49000,
+                  "hard_min_salary": True, "seeds": 8, "seed_block": 10},
+    "seedblk20": {"score": None, "top": 1, "min_total_salary": 49000,
+                  "hard_min_salary": True, "seeds": 8, "seed_block": 20},
     # ---- bigger primary stacks, RETESTED --------------------------------
     # Forcing 5-stacks measured -11.89 and 5,5,4 measured -26.00, but both
     # predate the 09/03 harness fixes: the paired verdict then tested dMean,
@@ -865,6 +896,9 @@ class Builder:
         self.hard_min_salary = False
         # Prefer an SP who plays FOR the stacked team (see pick_sp_pair).
         self.sp_with_stack = False
+        # Advance the RNG path every N lineups instead of holding one seed for
+        # the whole portfolio. See block_seed().
+        self.seed_block = 0
         self.hitter_min_avg26 = None
         self.fill_max_bo = None
         self.force_bringback = False
@@ -875,6 +909,25 @@ class Builder:
     @staticmethod
     def sig(lu_):
         return tuple(sorted(p["name"] for p in lu_.values()))
+
+    def block_seed(self):
+        """The seed to build the NEXT lineup under.
+
+        One seed per portfolio means every spec is explored exactly once --
+        the first valid construction the RNG produces wins, and a poor path on
+        the slate's best stack is never revisited. Advancing the seed every
+        `seed_block` lineups re-rolls construction as the portfolio fills,
+        WITHOUT thinning the allocation: the spec list is untouched, so every
+        team still gets its lineups, they are just built under different RNG
+        paths.
+
+        Motivated by 09/06: the same arm on the same snapshot gave `best` of
+        131.20 / 151.60 / 161.20 across three seeds -- a 30-point swing that a
+        single-seed portfolio is fully exposed to.
+        """
+        if not self.seed_block:
+            return self.seed
+        return self.seed + len(self.lineups) // self.seed_block
 
     def pick_sp_pair(self, spec, rng):
         stack_t = spec["stack"]
@@ -1316,7 +1369,7 @@ class Builder:
                     break
                 self.min_total_salary = level
                 for attempt in range(500):
-                    rng = stable_rng(self.seed, spec["stack"], spec["tier"],
+                    rng = stable_rng(self.block_seed(), spec["stack"], spec["tier"],
                                      attempt)
                     res = self.try_build(spec, rng)
                     if not res:
@@ -1348,7 +1401,7 @@ class Builder:
                 spec = dict(spec, no_bringback=True)
                 self.reject["bring-back dropped to build the lineup"] += 1
                 for attempt in range(500):
-                    rng = stable_rng(self.seed, spec["stack"], spec["tier"],
+                    rng = stable_rng(self.block_seed(), spec["stack"], spec["tier"],
                                      "nobb", attempt)
                     res = self.try_build(spec, rng)
                     if not res:
@@ -1374,7 +1427,7 @@ class Builder:
                     # Sample the best few rather than always taking #1.
                     # Deterministic in the seed, so a rerun reproduces exactly.
                     pool = cands[:min(top, len(cands))]
-                    pick = stable_rng(self.seed, spec["stack"], spec["tier"],
+                    pick = stable_rng(self.block_seed(), spec["stack"], spec["tier"],
                                       "select").randrange(len(pool))
                     cands = [pool[pick]] + [c for i, c in enumerate(pool)
                                             if i != pick]
@@ -1498,6 +1551,11 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--seed-block", type=int, default=None,
+                    help="advance the RNG seed every N lineups instead of "
+                         "holding one seed for the whole portfolio (0 = off, "
+                         "the historical behaviour). The spec list is "
+                         "unchanged, so the team allocation is not thinned")
     ap.add_argument("--hard-avoid-bs", type=float, default=None,
                     help="SP adj_bs below this gets zero exposure (default "
                          "10). Swept over 9 normal slates: 0 cost -5.15 and "
@@ -1630,6 +1688,8 @@ def main():
     b.min_total_salary = mspend
     b.hard_min_salary = bool(cfg.get("hard_min_salary") or args.hard_min_salary)
     b.sp_with_stack = bool(cfg.get("sp_with_stack") or args.sp_with_stack)
+    b.seed_block = (cfg.get("seed_block", 0) if args.seed_block is None
+                    else args.seed_block)
     havg = (cfg.get("hitter_min_avg26") if args.hitter_min_avg26 is None
             else (args.hitter_min_avg26 or None))
     b.hitter_min_avg26 = havg

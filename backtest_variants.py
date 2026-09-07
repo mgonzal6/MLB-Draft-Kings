@@ -37,12 +37,14 @@ Cost: one build subprocess per slate x variant x seed. --seeds 10 over 4 arms
 and 3 slates is 120 builds.
 """
 import argparse
+import concurrent.futures as cf
 import glob
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import tempfile
 
 import pandas as pd
@@ -114,6 +116,21 @@ def build_once(snap, variant, seed, lineups, scratch, build_seeds=1):
                        env=dict(os.environ, PYTHONUTF8="1"), cwd=HERE)
     ups = glob.glob(os.path.join(scratch, "DK_upload_*.csv"))
     ups = [u for u in ups if "_cash_" not in os.path.basename(u)]
+    if not ups:
+        # A <=4-game card routes through try_build_cash, whose
+        # CASH_MIN_SPEND=48000 is unreachable on 2 games: the SP pair bans two
+        # of the four teams, so all 8 hitters must come from the remaining
+        # two. Every attempt fails and the slate silently DROPS for every arm
+        # -- 3 of 24 snapshots on 09/06, which is how the replay set quietly
+        # shrank. Production already works around this by hand with --cash 0,
+        # so the harness retries the same way. Only on total failure, so
+        # 3- and 4-game cards that build fine keep their cash-style path and
+        # their results stay comparable with earlier sweeps.
+        r = subprocess.run(cmd + ["--cash", "0"], capture_output=True,
+                           text=True, env=dict(os.environ, PYTHONUTF8="1"),
+                           cwd=HERE)
+        ups = [u for u in glob.glob(os.path.join(scratch, "DK_upload_*.csv"))
+               if "_cash_" not in os.path.basename(u)]
     if not ups:
         return None, (r.stdout or r.stderr or "").strip()[-120:]
     return pd.read_csv(ups[0]), None
@@ -187,6 +204,11 @@ def main():
                     help="how many seeds to run per arm, counting up from "
                          "--seed. 1 (the default) reproduces the old "
                          "single-draw run; >1 enables the paired delta table")
+    ap.add_argument("--jobs", type=int, default=6,
+                    help="builds to run concurrently (default 6). Builds are "
+                         "independent subprocesses with their own scratch "
+                         "dirs, so this is a pure speedup; the sequential "
+                         "loop used ~15%% of an 8-core machine")
     ap.add_argument("--build-seeds", type=int, default=1,
                     help="passed to each build as --seeds: let a constrained "
                          "arm refill its shortfall from further seeds so both "
@@ -237,6 +259,43 @@ def main():
     # each other's inputs mid-build.
     scratch = os.path.abspath(os.path.join(tempfile.gettempdir(),
                                            "bt_variants_%d" % os.getpid()))
+
+    # ---- run every build up front, in parallel -------------------------
+    # Builds are independent processes with their own scratch dirs and no
+    # shared state, and subprocess.run releases the GIL, so threads give a
+    # near-linear speedup. Measured 09/06: the sequential loop used ~15% of an
+    # 8-core machine and a 120-build sweep took ~35 min. This is a pure
+    # speedup -- the builds themselves are byte-identical, only their order
+    # and concurrency change.
+    tasks = [(snap, v, sd_)
+             for snap, _, _ in pairs for v in variants for sd_ in seeds]
+    built = {}
+    done_n = [0]
+    lock = threading.Lock()
+
+    def run_one(t):
+        snap, v, sd_ = t
+        # one scratch dir per task, or concurrent builds wipe each other
+        d = "%s_%s_%s_%s" % (scratch, os.path.basename(snap), v, sd_)
+        out = build_once(snap, v, sd_, args.lineups, d, args.build_seeds)
+        shutil.rmtree(d, ignore_errors=True)
+        with lock:
+            done_n[0] += 1
+            tick(f"  built {done_n[0]}/{len(tasks)} ...")
+            # tick() is stderr-only and silences itself when redirected, so a
+            # backgrounded sweep printed NOTHING until the very end. Progress
+            # also goes to stdout every 10% so a log tail shows life.
+            step = max(1, len(tasks) // 10)
+            if done_n[0] % step == 0 or done_n[0] == len(tasks):
+                print(f"  ... {done_n[0]}/{len(tasks)} builds done",
+                      flush=True)
+        return t, out
+
+    with cf.ThreadPoolExecutor(max_workers=args.jobs) as ex:
+        for t, out in ex.map(run_one, tasks):
+            built[t] = out
+    tick()
+
     results = []
     for snap, cpath, cov in pairs:
         fpts, scores, n_field = contests[cpath]
@@ -258,11 +317,8 @@ def main():
         for v in variants:
             per_seed = []
             for sd_ in seeds:
-                tick(f"  building {v} seed {sd_} ...")
-                d, err = build_once(snap, v, sd_, args.lineups, scratch,
-                                    args.build_seeds)
+                d, err = built[(snap, v, sd_)]
                 if d is None:
-                    tick()
                     print(f"{v:<12}  seed {sd_} build failed: {err}")
                     continue
                 m = score_portfolio(d, fpts, scores, bar)
