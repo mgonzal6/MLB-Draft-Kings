@@ -1676,12 +1676,14 @@ def main():
                          "5-stacks, so they cannot make the shape that wins "
                          "a tournament")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--variant", default="minspend49",
+    ap.add_argument("--variant", default="minspend49cov",
                     choices=["control", "none"] + sorted(VARIANTS),
-                    help="Build arm. Defaults to minspend49, shipped 09/04 "
-                         "(better on 10 of 11 slate dates, t 3.53). Pass "
-                         "'control' for the previous shipping builder, or "
-                         "'none' for the unsuffixed legacy filenames.")
+                    help="Build arm. Defaults to minspend49cov, shipped "
+                         "09/07: minspend49 plus a per-team 5-stack guarantee "
+                         "that fires only at <=4 games (+8.42 dBest there, "
+                         "byte-identical above). Pass 'minspend49' for the "
+                         "previous default, 'control' for the older builder, "
+                         "or 'none' for the unsuffixed legacy filenames.")
     ap.add_argument("--candidates", type=int, default=20,
                     help="valid lineups to generate per slot before picking "
                          "the best (ignored by control; default 20)")

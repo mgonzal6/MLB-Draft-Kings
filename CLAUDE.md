@@ -870,6 +870,86 @@ to switch off an arm with three live slates and three top-10 finishes onto one
 whose only live slate went 0-for-6. When the measurement cannot separate two
 arms, the live record is the tiebreaker.
 
+## SHIPPED 09/07: `minspend49cov` — per-team 5-stack guarantee on thin cards
+
+The user's design, and the first change all week that improves the shipped arm
+with no trade-off. It is `minspend49` plus: on a card of <=4 games, guarantee
+EVERY team one 5-stack before the normal allocation runs, overriding the fade.
+
+    variant          bestAvg  gapAvg  top10   dBest   SE     t
+    control            141.6  -11.20   11.7      --    --    --
+    minspend49         146.7   -6.11   18.7    +5.1   1.7  2.97
+    minspend49cov      147.8   -5.02   18.7    +6.2   1.7  3.62
+
+t 3.62 is the strongest arm measured here. Top-10 count is unchanged and the
+gap to 10th improves a full point -- it gains without giving anything back,
+because on 20 of 23 slates it IS minspend49.
+
+**Verified as a strict superset.** By depth, against minspend49:
+
+    thin <=4 games    9 pairs   dBest +8.42  t 3.73   7 better, 0 worse
+    mid  5-7 games   24 pairs   dBest  0.00  SE 0.00  every pair TIED
+    deep 8+  games   36 pairs   dBest  0.00  SE 0.00  every pair TIED
+
+Sixty of 69 pairs are byte-identical. If a future sweep shows ANY spread in
+the mid/deep rows, the slate-size condition has leaked.
+
+**Why the threshold is at 4 games.** The cost is the guarantee itself, not its
+benefit: covering six teams costs six lineups and insures the whole slate;
+covering eighteen costs eighteen and spends most of them on offences the
+allocator rates near the bottom. Unconditional, it measured -4.99 on mid
+slates and -2.81 on deep ones -- losing even though it built 5-13 MORE lineups
+there.
+
+**The fade stays.** `allteam5nofade` (guarantee + SP fade disabled) was WORSE
+than the guarantee alone on mid slates (-7.15 vs -4.99) and identical on thin
+ones, because the guarantee already overrides the fade for its own specs.
+Removing the fade is not what makes this work.
+
+**In-sample warning.** Nine thin-slate pairs are three distinct slates, one of
+which is 09/07 -- the slate that motivated the idea. Expect +8.42 to move as
+more thin cards accumulate.
+
+**What 09/07 evening looked like without it**, which is why this exists: ATH
+was hard-faded for facing Cease (adj_bs 63.47) and appeared in ZERO of 36
+lineups. Cease then went for 11.65 while ATH put up Henry Bolte 39.00 at 6.4%
+owned and Zack Gelof 23.00. Three of the twelve top-10 lineups in that contest
+were ATH stacks, two of them 5-stacks. Our best was -23.00 off the bar. A hard
+fade converts "less likely to score" into "cannot appear", on a signal
+(implied_total, +0.130) barely better than chance.
+
+**Knobs:** `--all-team-five`, `--all-team-five-per N` (guarantees per team,
+round-robin), `--all-team-five-max-games N` (default 4), `--fade-sp-bs N`
+(default 55, never swept).
+
+## I BROKE THE SHIPPED ARM WITH AN UNMEASURED "FIX". Do not touch spec order.
+
+Recorded because the failure mode is subtle and I fell into it while enforcing
+the same rule on everything else.
+
+`make_specs` emits the allocation in BLOCK order -- all of team A's lineups,
+then team B's. That looked like a bug: on 09/07 the slate delivered 30 of 67
+and SF got ZERO stacks despite the second-highest implied total, purely for
+sorting late. I replaced it with round-robin interleaving, called it a fix,
+and ran a sweep.
+
+The block order is LOAD-BEARING. The tier ladder assigns CEILING to the first
+n_ceil specs and CONTRARIAN to the last n_cont, so it only lands the ceiling
+tier on the best offences BECAUSE the list is in block order. Interleaving
+scattered the tiers across teams.
+
+    minspend49 vs control    before  +5.2  t 3.09   bestAvg 148.2
+                             after   -1.1  t -0.67  bestAvg 141.5
+
+A 6.7-point regression in the live default, and it silently contaminated the
+sweep running against it -- the baseline moved underneath the experiment, the
+same class of error as the 09/04 `--variant` default bug. Reverted; the
+comment at the call site carries these numbers.
+
+Two rules this cost: never change a SHARED code path (make_specs, audit,
+allocate_stacks) while a comparison is running against it, and no builder
+change ships unmeasured -- including ones that look like obvious bug fixes.
+
 ## FIX #18 RETIRED 09/07: thin slates no longer build cash-style
 
 The single most consequential change in a while, and it came from the user
@@ -1368,14 +1448,21 @@ that needs the full path. Set `PYTHONUTF8=1` when redirecting output.
     python build_portfolio.py --lineups 60
     python make_entries.py [--duplicates]
 
-**The shipped arm is `minspend49` as of 09/04, not control.** Both defaults
-now point at it -- `--variant` in build_portfolio and `--arms` in
-make_entries -- so `run_slate_build.bat`, which calls the builder bare, picks
-it up with no edit. The arm also carries its own refill count (`"seeds": 8`)
-because a hard floor underfills, 45 of 60 on 09/03; shipping it as a flag
-would have meant remembering `--seeds` at 6pm or silently entering short.
-`--variant control` restores the previous builder, `--variant none` the older
-unsuffixed filenames.
+**The shipped arm is `minspend49cov` as of 09/07** (`minspend49` from 09/04 to
+09/07, control before that). Both defaults point at it -- `--variant` in
+build_portfolio and `--arms` in make_entries -- so `run_slate_build.bat`,
+which calls the builder bare, picks it up with no edit. The arm carries its
+own refill count (`"seeds": 8`) because a hard floor underfills, 45 of 60 on
+09/03; shipping that as a flag would have meant remembering `--seeds` at 6pm
+or silently entering short.
+
+`minspend49cov` = `minspend49` plus a per-team 5-stack guarantee that fires
+only at <=4 games, so on any normal card it is byte-identical to the arm it
+replaced. `--variant minspend49` drops the guarantee, `--variant control` the
+older builder, `--variant none` the unsuffixed filenames.
+
+**Cash lineups are opt-in since 09/07.** No slate size builds them by default,
+so `--cash 0` is never needed any more -- and 2-game cards no longer fail.
 
 60 fills on a real slate; verified against frozen snapshots rather than
 assumed. 08/28 (12 games) built 59 of 60 -- one ceiling lineup could not be
