@@ -295,6 +295,52 @@ VARIANTS = {
     # "closer to where they sit" is the obvious next question -- but a floor
     # this tight starves construction, and the refill can only recover what
     # the pool can actually build.
+    # ---- guarantee every team a 5-stack ----------------------------------
+    # User's design, 09/07, after ATH was hard-faded for facing Cease and then
+    # scored 4 runs off him while we held zero ATH exposure across 36 lineups.
+    # Coverage first, weighting second: every team gets one 5-stack, then the
+    # normal allocation fills the rest.
+    "allteam5": {"score": None, "top": 1, "min_total_salary": 49000,
+                 "hard_min_salary": True, "seeds": 8, "all_team_five": True},
+    # Same, with the SP-based fade disabled entirely, to separate "guarantee
+    # coverage" from "stop fading" -- they are different changes and the
+    # guarantee already overrides the fade for its own specs.
+    "allteam5nofade": {"score": None, "top": 1, "min_total_salary": 49000,
+                       "hard_min_salary": True, "seeds": 8,
+                       "all_team_five": True, "fade_sp_bs": 999},
+    # ---- batting order on fills, RETESTED 09/07 --------------------------
+    # The block above rejected bo6 on 9 slates against minspend47, with the
+    # paired verdict computed on dMean -- the same defect that made the
+    # stack-size result wrong for weeks. Retested on minspend49 over the full
+    # slate set.
+    #
+    # Measured first, 3,132 player-slates over 24 slates, realised FPTS:
+    #
+    #   BO    meanPts  p(>=15)  meanSal        BO 1-6  7.18  15.2%  4194
+    #    1     8.81     21.6%    4315          BO 7-9  5.34  10.6%  3003
+    #    2     7.56     17.1%    4744
+    #    3     7.84     15.5%    4609    Top six score 34% more and spike at
+    #    4     6.94     12.9%    4247    15.2% vs 10.6% -- but cost 40% more,
+    #    5     6.11     14.3%    3736    so points per $1,000 is 1.71 vs 1.78,
+    #    6     5.75      9.4%    3489    marginally FAVOURING the bottom. That
+    #    7     4.98      8.5%    3194    is why the bs/salary fill sort keeps
+    #    8     5.88     13.9%    3009    reaching for 7-9.
+    #    9     5.16      9.3%    2793
+    #
+    # Note the ordering is NOT monotonic: BO 8 beats BO 6 and 7 on both mean
+    # and spike rate -- it is the spot that turns over to the top. And BO 7
+    # spikes LEAST of all nine, which contradicts the old rejection's stated
+    # mechanism ("7-9 is where the cheap volatile bats that spike live").
+    # Hence three arms: the natural break at 5, the user's 6, and 6-plus-8.
+    "bo5": {"score": None, "top": 1, "min_total_salary": 49000,
+            "hard_min_salary": True, "seeds": 8,
+            "fill_bo_allow": {1, 2, 3, 4, 5}},
+    "bo6": {"score": None, "top": 1, "min_total_salary": 49000,
+            "hard_min_salary": True, "seeds": 8,
+            "fill_bo_allow": {1, 2, 3, 4, 5, 6}},
+    "bo6x8": {"score": None, "top": 1, "min_total_salary": 49000,
+              "hard_min_salary": True, "seeds": 8,
+              "fill_bo_allow": {1, 2, 3, 4, 5, 6, 8}},
     # ---- let the FILLS face our own SP; the stack never may --------------
     # User's idea, 09/07. The builder bans any hitter opposing either SP.
     # That is correct for the STACK -- betting on a team while betting
@@ -792,7 +838,7 @@ def build_hitter_pool(dk, lu, hcache, opp_map, vegas=None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
-                    max_stacks=MAX_STACKS_PER_TEAM):
+                    max_stacks=MAX_STACKS_PER_TEAM, fade_sp_bs=FADE_SP_BS):
     hit_df = pd.DataFrame(hit_pool)
     top4 = hit_df.groupby("team")["bs"].apply(lambda x: x.nlargest(4).sum())
     impl = pd.Series({t: vegas.loc[t, "implied_total"] if t in vegas.index else 4.0
@@ -801,7 +847,12 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
     ni = (impl - impl.min()) / max(impl.max() - impl.min(), 1e-9)
     stackscore = 0.6 * nb + 0.4 * ni
 
-    fades = {s["opp"] for _, s in sp_df.iterrows() if s["adj_bs"] >= FADE_SP_BS}
+    # A hard fade removes a whole offense from every lineup -- there is no
+    # relief valve in cash mode and only FADE_APPEAR_CAP in GPP. On a thin
+    # slate it also SHRINKS THE POOL: 09/07 (3 games) faded ATH for facing
+    # Cease (adj_bs 63.47) and built 36 distinct lineups against 67 entries,
+    # so the same rule that zeroed one team also forced 31 duplicates.
+    fades = {s["opp"] for _, s in sp_df.iterrows() if s["adj_bs"] >= fade_sp_bs}
     fades |= set(impl[impl <= impl.quantile(0.12)].index)
 
     pool = stackscore.drop(index=[t for t in fades if t in stackscore.index])
@@ -843,12 +894,40 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
     return alloc, impl, fades
 
 
-def make_specs(alloc, n_lineups, sizes=(5, 4, 3)):
+def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None):
     """Tier assignment: ~20% ceiling, ~20% contrarian, rest core.
 
     `sizes` is (ceiling, core, contrarian) stack sizes.
+
+    `all_teams`, when given, guarantees EVERY team on the slate one 5-stack
+    before the normal allocation runs. Motivation, measured 09/07 over 384
+    team-slates: implied_total predicts a team's top-5 output at only +0.130
+    within-slate, and the highest-implied team lands in the BOTTOM HALF of
+    realised output 54.5% of the time. We cannot pick the team, so guarantee
+    coverage of all of them and let the existing allocation weight the rest.
+
+    This deliberately OVERRIDES the fade. 09/07: ATH was hard-faded for
+    facing Cease (adj_bs 63.47), so they appeared in zero of 36 lineups --
+    and then scored 4 runs off him. A fade is a prior on a signal we have
+    measured as barely better than chance; coverage is not.
+
+    Distinct from stack554, which forced big stacks but still allocated teams
+    by stackscore -- it concentrated on the teams we already liked. This
+    guarantees a coverage floor first.
     """
     ceil_sz, core_sz, cont_sz = sizes
+    guaranteed = []
+    if all_teams:
+        seen = set()
+        for t in all_teams:
+            if t not in seen:
+                seen.add(t)
+                guaranteed.append({"stack": t, "tier": "CEILING", "size": 5})
+        # The guarantee consumes lineups; the normal allocation fills what is
+        # left, so a slate with more teams than entries gets coverage only.
+        n_lineups = max(0, n_lineups - len(guaranteed))
+        if n_lineups == 0:
+            return guaranteed[:len(guaranteed)]
     n_ceil = max(1, round(n_lineups * 0.2))
     n_cont = max(1, round(n_lineups * 0.2))
     stack_list = [t for t, n in alloc.items() for _ in range(n)]
@@ -862,7 +941,7 @@ def make_specs(alloc, n_lineups, sizes=(5, 4, 3)):
             tier, size = "CORE", core_sz
         first_seen.add(team)
         specs.append({"stack": team, "tier": tier, "size": size})
-    return specs
+    return guaranteed + specs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -931,6 +1010,8 @@ class Builder:
         self.seed_block = 0
         # Let FILL hitters face our own SP. The stack never may.
         self.fill_may_oppose = False
+        # Restrict FILL hitters to these batting-order slots (None = 1-9).
+        self.fill_bo_allow = None
         self.hitter_min_avg26 = None
         self.fill_max_bo = None
         self.force_bringback = False
@@ -1298,6 +1379,8 @@ class Builder:
                         and h["avg26"] >= (self.hitter_min_avg26 or 0)
                         and h.get("own_pct", 100.0) >= (self.hitter_min_own or 0)
                         and h["bo"] <= (self.fill_max_bo or 9)
+                        and (not self.fill_bo_allow
+                             or h["bo"] in self.fill_bo_allow)
                         and (h["team"] == stack_t                   # Fix #15
                              or self.fill_appear[h["name"]] < fill_cap)
                         and not (h["team"] in self.fades
@@ -1605,6 +1688,17 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--all-team-five", action="store_true",
+                    help="guarantee EVERY team on the slate one 5-stack "
+                         "before the normal allocation, overriding the fade. "
+                         "Buys coverage of a team-eruption we cannot predict "
+                         "(implied_total correlates +0.130 with team output)")
+    ap.add_argument("--fade-sp-bs", type=float, default=None,
+                    help="hard-fade the offense facing any SP at or above "
+                         "this adj_bs (default 55). A fade removes the team "
+                         "from EVERY lineup and shrinks the pool, which on a "
+                         "thin slate also costs distinct lineups. Raise it to "
+                         "fade less; 999 disables the SP-based fade")
     ap.add_argument("--fill-may-oppose", action="store_true",
                     help="allow FILL hitters to face our own SP (the stack "
                          "never may). Widens the construction space at the "
@@ -1720,8 +1814,21 @@ def main():
     n_gpp = args.lineups - args.cash
     if n_gpp < 0:
         sys.exit("ERROR: --cash cannot exceed --lineups")
+    # _cfg0 is the same dict as `cfg` below; `cfg` is not bound until after
+    # the pool is built, and both of these are needed before that.
+    _fsb = (_cfg0.get("fade_sp_bs", FADE_SP_BS) if args.fade_sp_bs is None
+            else args.fade_sp_bs)
+    # Guarantee every team one 5-stack, best offences first so that a slate
+    # with fewer entries than teams still covers the likeliest ones.
+    _allteams = None
+    if _cfg0.get("all_team_five") or args.all_team_five:
+        _byimpl = sorted({h["team"] for h in hit_pool},
+                         key=lambda t: -(vegas.loc[t, "implied_total"]
+                                         if t in vegas.index else 0.0))
+        _allteams = _byimpl
     alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, n_gpp, opp_map,
-                                         max_stacks=args.max_stacks)
+                                         max_stacks=args.max_stacks,
+                                         fade_sp_bs=_fsb)
     print(f"\nHard fades (≤25% appearances): {sorted(fades)}")
     print(f"Primary-stack allocation ({n_gpp} GPP lineups):")
     for t, n in alloc.items():
@@ -1734,7 +1841,7 @@ def main():
         print("max-correlation: stack sizes %s" % (sizes,))
     if len(sizes) != 3:
         sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
-    specs = make_specs(alloc, n_gpp, sizes=sizes)
+    specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams)
     fade_reserved = defaultdict(int)
     for spec in specs:
         if spec["stack"] in fades:
@@ -1767,6 +1874,7 @@ def main():
                     else args.seed_block)
     b.fill_may_oppose = bool(cfg.get("fill_may_oppose")
                              or args.fill_may_oppose)
+    b.fill_bo_allow = cfg.get("fill_bo_allow")
     havg = (cfg.get("hitter_min_avg26") if args.hitter_min_avg26 is None
             else (args.hitter_min_avg26 or None))
     b.hitter_min_avg26 = havg
@@ -1842,7 +1950,7 @@ def main():
             # to the shortfall or the refill builds a second full portfolio.
             # Rotate the start each pass so successive seeds refill different
             # teams rather than hammering the top of the allocation.
-            full = make_specs(alloc, args.lineups, sizes=sizes)
+            full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams)
             off = (k * short) % max(1, len(full))
             more = (full + full)[off:off + short]
             before = len(b.lineups)
