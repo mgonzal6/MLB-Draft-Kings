@@ -37,6 +37,8 @@ Cost: one build subprocess per slate x variant x seed. --seeds 10 over 4 arms
 and 3 slates is 120 builds.
 """
 import argparse
+import collections
+import csv
 import concurrent.futures as cf
 import glob
 import os
@@ -87,6 +89,56 @@ def rank_of(score, scores):
     return lo + 1
 
 
+def merge_arms(base, donor, snap, want):
+    """Fill `base` up to `want` with distinct lineups from `donor`.
+
+    A duplicate entry is worth ZERO extra draws -- it scores identically -- so
+    when a slate caps the portfolio below the entry count, a lineup from a
+    second arm is strictly better than a copy. Donors are taken only if not
+    already present AND if they keep every player inside the exposure caps
+    over the COMBINED portfolio, which is what stops the tail of the
+    portfolio concentrating.
+    """
+    pos = {}
+    with open(os.path.join(snap, "Filtered_DKSalaries.csv"), newline="",
+              encoding="utf-8-sig") as fh:
+        for r in csv.DictReader(fh):
+            pos[r["Name"].strip()] = r["Roster Position"].strip()
+
+    def sig(row):
+        out = set()
+        for c in row:
+            m = NAME_RE.match(str(c).strip())
+            out.add(m.group(1) if m else str(c).strip())
+        return frozenset(out)
+
+    seen, sp, hit = set(), collections.Counter(), collections.Counter()
+    for _, r in base.iterrows():
+        s = sig(r)
+        seen.add(s)
+        for n in s:
+            (sp if pos.get(n) == "P" else hit)[n] += 1
+    sp_cap, hit_cap = round(0.40 * want), round(0.20 * want)
+    rows = []
+    for _, r in donor.iterrows():
+        if len(base) + len(rows) >= want:
+            break
+        s = sig(r)
+        if s in seen:
+            continue
+        if any(sp[n] + 1 > sp_cap for n in s if pos.get(n) == "P"):
+            continue
+        if any(hit[n] + 1 > hit_cap for n in s if pos.get(n) != "P"):
+            continue
+        for n in s:
+            (sp if pos.get(n) == "P" else hit)[n] += 1
+        seen.add(s)
+        rows.append(r)
+    if not rows:
+        return base
+    return pd.concat([base, pd.DataFrame(rows)], ignore_index=True)
+
+
 def build_once(snap, variant, seed, lineups, scratch, build_seeds=1):
     """Rebuild one portfolio from a snapshot. -> (upload DataFrame, error str).
 
@@ -94,6 +146,22 @@ def build_once(snap, variant, seed, lineups, scratch, build_seeds=1):
     upload by slate date and variant, not by seed, so a stale file left behind
     would be picked up as this seed's portfolio.
     """
+    # "A+B" means: build A, then fill any shortfall with distinct lineups
+    # from B rather than duplicating. See merge_arms().
+    if "+" in variant:
+        prim, don = variant.split("+", 1)
+        a, err = build_once(snap, prim, seed, lineups,
+                            scratch + "_a", build_seeds)
+        if a is None:
+            return None, err
+        if len(a) >= lineups:
+            return a, None
+        b, _ = build_once(snap, don, seed, lineups,
+                          scratch + "_b", build_seeds)
+        if b is None:
+            return a, None
+        return merge_arms(a, b, snap, lineups), None
+
     shutil.rmtree(scratch, ignore_errors=True)
     os.makedirs(scratch)
     for f in NEEDED:

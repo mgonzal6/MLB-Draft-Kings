@@ -116,6 +116,15 @@ FADE_APPEAR_CAP = 0.25
 FILL_CAP = 0.20             # Fix #15 — non-stack hitter appearance cap
 MAX_STACKS_PER_TEAM = 3     # see Fix #21 — 2 was tested and did NOT help
 HARD_AVOID_BS = 10          # SP adj_bs below this -> zero exposure
+# DK's Roster Position for a pitcher is usually "P", but NOT always: on
+# 09/07 Jonah Tong (NYM) came through as "SP" and Derek Law (ARI) as "RP".
+# Both were confirmed starters in the lineups feed -- preflight counted 12 of
+# 12 -- and both were then dropped by an exact `== "P"` match, so the SP pool
+# held 10 arms for 12 teams. Neither NYM nor ARI could be stacked against,
+# and ARI had the slate's HIGHEST implied total (5.25). Same class of bug as
+# the nickname-map miss recorded below: the pitcher is present in every input
+# and silently vanishes on a string comparison.
+PITCHER_POS = {"P", "SP", "RP"}
 SMALL_SLATE_GAMES = 4       # Fix #18 — at or below this, build all-cash
 
 # Cash-lineup knobs (single-entry double-ups: floor over ceiling)
@@ -286,6 +295,25 @@ VARIANTS = {
     # "closer to where they sit" is the obvious next question -- but a floor
     # this tight starves construction, and the refill can only recover what
     # the pool can actually build.
+    # ---- let the FILLS face our own SP; the stack never may --------------
+    # User's idea, 09/07. The builder bans any hitter opposing either SP.
+    # That is correct for the STACK -- betting on a team while betting
+    # against it with your arm is incoherent -- but the fills are 1-3 slots
+    # chosen after the stack, and banning two whole teams there is what runs
+    # the construction space dry. On a 3-game card it is severe: the SP pair
+    # bans two of six teams, so fills draw from four.
+    #
+    # Cost: a fill facing our own SP is negatively correlated -- his hits are
+    # our pitcher's runs. Benefit: more legal constructions, which is the
+    # binding constraint whenever a slate caps the portfolio below the entry
+    # count. Tested both on top of minspend49 and with stack554, since the
+    # 5-stack version has the least fill freedom to begin with.
+    "fillopp49": {"score": None, "top": 1, "min_total_salary": 49000,
+                  "hard_min_salary": True, "seeds": 8,
+                  "fill_may_oppose": True},
+    "fillopp554": {"score": None, "top": 1, "min_total_salary": 49000,
+                   "hard_min_salary": True, "seeds": 8,
+                   "stack_sizes": (5, 5, 4), "fill_may_oppose": True},
     # ---- SMALLER primary stacks, the opposite of stack554 ----------------
     # User's idea, 09/07, and better motivated than stack554 was. The team
     # study over 384 team-slates found implied_total predicts a team's top-5
@@ -578,7 +606,8 @@ def build_sp_pool(dk, lu, padj, opp_map, n_lineups,
     slate_io.unconfirmed_banner(int((sp_rows["conf"] != "Y").sum()),
                                 "STARTING PITCHERS")
     for _, r in sp_rows.iterrows():
-        cand = dk[(dk["nname"] == r["nname"]) & (dk["Roster Position"] == "P")]
+        cand = dk[(dk["nname"] == r["nname"])
+                  & (dk["Roster Position"].isin(PITCHER_POS))]
         if cand.empty:
             print(f"  WARN SP not in DK slate file: {r['player name']}")
             continue
@@ -693,7 +722,8 @@ def build_hitter_pool(dk, lu, hcache, opp_map, vegas=None):
         bo = pd.to_numeric(r["batting order"], errors="coerce")
         if not (1 <= (bo or 0) <= 9):
             continue
-        cand = dk[(dk["nname"] == r["nname"]) & (dk["Roster Position"] != "P")]
+        cand = dk[(dk["nname"] == r["nname"])
+                  & (~dk["Roster Position"].isin(PITCHER_POS))]
         if len(cand) > 1:
             cand = cand[cand["TeamAbbrev"] == r["team"]]
         if cand.empty:
@@ -899,6 +929,8 @@ class Builder:
         # Advance the RNG path every N lineups instead of holding one seed for
         # the whole portfolio. See block_seed().
         self.seed_block = 0
+        # Let FILL hitters face our own SP. The stack never may.
+        self.fill_may_oppose = False
         self.hitter_min_avg26 = None
         self.fill_max_bo = None
         self.force_bringback = False
@@ -1074,8 +1106,14 @@ class Builder:
         salary = sp1["salary"] + sp2["salary"]
 
         med_impl = self.impl.median()
+        # A cash lineup has no stack -- every hitter is a fill -- so
+        # fill_may_oppose lifts the opposing-SP ban for all eight. This is a
+        # bigger relaxation in character than the GPP version and it is where
+        # the constraint actually bites: on a 3-game card the SP pair bans
+        # two of six teams, leaving four to fill eight slots.
         ok_teams = {t for t in self.impl.index
-                    if t not in banned and t not in self.fades}
+                    if (self.fill_may_oppose or t not in banned)
+                    and t not in self.fades}
         top_teams = {t for t in ok_teams if self.impl.get(t, 0) >= med_impl}
         if len(top_teams) * CASH_TEAM_CAP < len(HITTER_SLOTS):
             top_teams = ok_teams    # small slate: implied filter too strict
@@ -1251,7 +1289,11 @@ class Builder:
             def eligible(min_sal):
                 return [h for h in self.hit_pool
                         if slot in h["slots"] and h["name"] not in used
-                        and h["team"] not in banned and tcount[h["team"]] < 5
+                        # FILL slots may face our own SP when the arm allows
+                        # it; the STACK never may (it is chosen before this
+                        # loop and `banned` already excluded it there).
+                        and (self.fill_may_oppose or h["team"] not in banned)
+                        and tcount[h["team"]] < 5
                         and h["salary"] <= budget and h["salary"] >= min_sal
                         and h["avg26"] >= (self.hitter_min_avg26 or 0)
                         and h.get("own_pct", 100.0) >= (self.hitter_min_own or 0)
@@ -1451,7 +1493,7 @@ class Builder:
 # Audit — the 7 hard checks; nothing is written unless every lineup passes
 # ─────────────────────────────────────────────────────────────────────────────
 
-def audit(lineups, game_map):
+def audit(lineups, game_map, allow_fill_oppose=False):
     failures = 0
     for i, L in enumerate(lineups):
         lu_ = L["lineup"]
@@ -1469,10 +1511,19 @@ def audit(lineups, game_map):
             tc[lu_[s]["team"]] += 1
         if tc and max(tc.values()) > 5:
             errs.append(">5 hitters from one team")
+        # The opposing-hitter ban is absolute for the STACK and optional for
+        # FILLS. A fill facing our own SP is negatively correlated -- his
+        # hits are our pitcher's runs -- but it is 1-3 slots, and relaxing it
+        # widens the construction space, which is what runs out on thin
+        # slates. `stack` is the spec's team, so anything else is a fill.
+        stack_t = L.get("spec", {}).get("stack")
         for sp in ("SP1", "SP2"):
             for s in HITTER_SLOTS:
-                if lu_[s]["team"] == lu_[sp]["opp"]:
-                    errs.append(f"{lu_[s]['name']} opposes {lu_[sp]['name']}")
+                if lu_[s]["team"] != lu_[sp]["opp"]:
+                    continue
+                if allow_fill_oppose and lu_[s]["team"] != stack_t:
+                    continue
+                errs.append(f"{lu_[s]['name']} opposes {lu_[sp]['name']}")
         if len({game_map[lu_[s]["team"]] for s in ALL_SLOTS}) < 2:
             errs.append("single game")
         if errs:
@@ -1513,8 +1564,11 @@ def main():
     ap.add_argument("--lineups", type=int, default=20,
                     help="total lineups, cash included")
     ap.add_argument("--cash", type=int, default=None,
-                    help="floor-maximized lineups (default: 0 on a normal "
-                         "slate, ALL on a <=4-game slate)")
+                    help="floor-maximized lineups (default 0 at every slate "
+                         "size since 09/07). These are built for 50/50s and "
+                         "double-ups: CASH_TEAM_CAP=3 forbids 4- and "
+                         "5-stacks, so they cannot make the shape that wins "
+                         "a tournament")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--variant", default="minspend49",
                     choices=["control", "none"] + sorted(VARIANTS),
@@ -1551,6 +1605,10 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--fill-may-oppose", action="store_true",
+                    help="allow FILL hitters to face our own SP (the stack "
+                         "never may). Widens the construction space at the "
+                         "cost of negative correlation in 1-3 slots")
     ap.add_argument("--seed-block", type=int, default=None,
                     help="advance the RNG seed every N lineups instead of "
                          "holding one seed for the whole portfolio (0 = off, "
@@ -1608,16 +1666,33 @@ def main():
     n_games = dk["Game Info"].nunique()
     print(f"Slate {slate_date}: {n_games} games, {len(dk)} DK players")
 
-    # Fix #18 — on a thin slate the GPP tier ladder has nothing to
-    # differentiate into. 8/22 (3 games): cash lineups averaged 89.4 and took
-    # both cashes; ceiling/core/contrarian averaged 69.7. Build all-cash.
+    # Fix #18 RETIRED 09/07. It used to route a <=SMALL_SLATE_GAMES slate
+    # entirely through try_build_cash, on evidence from 8/22 that cash lineups
+    # "took both cashes" -- i.e. it was justified by 50/50 and double-up
+    # results. The user stopped entering those, and the objective has been a
+    # top-10 FINISH for weeks. Every design choice in the cash builder trades
+    # ceiling for floor: CASH_TEAM_CAP=3 forbids 4- and 5-stacks outright,
+    # CASH_MIN_SALARY=3000 bans punts, and the fill takes one of the TOP TWO
+    # by avg26, which is near-argmax.
+    #
+    # Measured on the thin slates in the replay set:
+    #   * 09/05 early and night (2 games): cash mode builds ZERO lineups --
+    #     CASH_MIN_SPEND=48000 is unreachable once the SP pair bans two of
+    #     four teams. Not suboptimal, broken.
+    #   * 09/07 (3 games): 30 lineups cash vs 31 GPP, but ALL 36 of the live
+    #     cash portfolio were 3-stacks, while top-10 lineups on thin slates
+    #     ran 4- and 5-stacks 36% / 50% / 70% / 100% of the time.
+    #   * The three top-10 finishes on 09/05 came from portfolios built with
+    #     --cash 0, which was passed to work around the 2-game crash rather
+    #     than as strategy.
+    #
+    # Cash lineups are now opt-in only: pass --cash N to build them.
     if args.cash is None:
+        args.cash = 0
         if n_games <= SMALL_SLATE_GAMES:
-            args.cash = args.lineups
-            print(f"  small slate ({n_games} games <= {SMALL_SLATE_GAMES}): "
-                  f"building the whole portfolio cash-style (Fix #18)")
+            print(f"  small slate ({n_games} games): GPP build. Cash-style "
+                  f"routing retired 09/07 -- pass --cash N to restore it")
         else:
-            args.cash = 0
             print(f"  {n_games} games: full GPP build, no cash lineups "
                   f"(Fix #20 — pass --cash N to build them anyway)")
 
@@ -1690,6 +1765,8 @@ def main():
     b.sp_with_stack = bool(cfg.get("sp_with_stack") or args.sp_with_stack)
     b.seed_block = (cfg.get("seed_block", 0) if args.seed_block is None
                     else args.seed_block)
+    b.fill_may_oppose = bool(cfg.get("fill_may_oppose")
+                             or args.fill_may_oppose)
     havg = (cfg.get("hitter_min_avg26") if args.hitter_min_avg26 is None
             else (args.hitter_min_avg26 or None))
     b.hitter_min_avg26 = havg
@@ -1792,7 +1869,7 @@ def main():
             print(f"  {n:>7,}  {why}")
 
     print(f"\nBuilt {len(lineups)} lineups; auditing...")
-    if audit(lineups, game_map):
+    if audit(lineups, game_map, b.fill_may_oppose):
         sys.exit("AUDIT FAILURES — nothing written.")
     print("ALL AUDITS PASSED")
 

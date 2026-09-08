@@ -18,6 +18,10 @@ import slate_io
 
 EXPORT = r"G:\My Drive\DK\export"
 SLOTS = ["P", "P", "C", "1B", "2B", "3B", "SS", "OF", "OF", "OF"]
+# DK does not always spell a pitcher's Roster Position "P" -- 09/07 had an
+# "SP" and an "RP" among 12 confirmed starters. Must match build_portfolio's
+# PITCHER_POS or the validator rejects a lineup the builder legally made.
+PITCHER_POS = {"P", "SP", "RP"}
 CAP = 50000
 
 if len(sys.argv) < 2:
@@ -94,7 +98,7 @@ for i, row in up.iterrows():
         n = norm(name)
 
         if col == "P":
-            if pos != "P":
+            if pos not in PITCHER_POS:
                 errs.append(f"{name} ({pos}) is not a pitcher")
             if n not in conf_sp:
                 errs.append(f"{name} is NOT a confirmed SP in the lineups file")

@@ -870,6 +870,128 @@ to switch off an arm with three live slates and three top-10 finishes onto one
 whose only live slate went 0-for-6. When the measurement cannot separate two
 arms, the live record is the tiebreaker.
 
+## FIX #18 RETIRED 09/07: thin slates no longer build cash-style
+
+The single most consequential change in a while, and it came from the user
+asking why we suppress 5-stacks when winners have them.
+
+`SMALL_SLATE_GAMES = 4` routed any <=4-game card entirely through
+`try_build_cash`. That function is a CASH builder -- written for 50/50s and
+double-ups, where a high floor wins and ceiling is worthless. Every choice in
+it trades ceiling for floor:
+
+    CASH_TEAM_CAP = 3       forbids 4- and 5-stacks OUTRIGHT
+    CASH_MIN_SALARY = 3000  no punt plays
+    CASH_MIN_SPEND = 48000  must nearly max the cap
+    fill = top-2 by avg26   near-argmax, so it lands on the same bats
+
+Fix #18's own justification was "cash lineups took both cashes" on 8/22 --
+evidence about a contest type **the user stopped entering**. The objective has
+been a top-10 FINISH for weeks.
+
+What it was costing:
+
+  * **2-game cards built ZERO lineups.** CASH_MIN_SPEND is unreachable once
+    the SP pair bans two of four teams. Broken, not suboptimal.
+  * **09/07 evening: all 36 entered lineups were 3-stacks.** Top-10 lineups on
+    thin slates ran 4- and 5-stacks 36% / 50% / 70% / 100% of the time across
+    the four thin contests with standings. We were structurally incapable of
+    the shape that wins.
+  * **The three top-10 finishes on 09/05 came from `--cash 0` portfolios**,
+    68-100% four-and-five stacked. That flag was passed to work around the
+    2-game crash, not as strategy. The workaround was the win.
+  * The stray `DK_upload_cash_*` file this path writes broke `make_entries`
+    minutes before lock on 09/07.
+
+After the change, the same three snapshots build 9 / 6 / 31 where they
+previously built 0 / 0 / 30.
+
+`try_build_cash` and the CASH_* constants are UNTOUCHED and still reachable
+with `--cash N`. This is a routing change, not a deletion.
+
+**Methodological consequence for every sweep before 09/07.** Cash mode ignores
+variant config -- stack_sizes, the salary floor, all of it -- so on <=4-game
+slates every arm produced the IDENTICAL portfolio (verified: control,
+stack554 and stack443 all returned the same 36 lineups on 09/07). Those slates
+contributed ZERO discriminating information to the paired t-tests and only
+widened the SEs. No conclusion reverses, but arm comparisons run before this
+date were diluted by however many thin slates were in the set.
+
+**Not yet scored.** 09/07 evening is the first slate where both paths build a
+portfolio, and its standings were not available when this shipped. The change
+rests on the 2-game builds being broken, the winner shapes, and the 09/05
+provenance -- not on a replay. Score it when those standings land.
+
+## The opposing-SP ban is LOAD-BEARING, not orthodoxy. Do not relax it.
+
+User's idea, 09/07: let FILL hitters face our own SP while the stack still
+never may, to widen the construction space. Built as `--fill-may-oppose`
+(`fillopp49`, `fillopp554`). It needed three changes -- the GPP fill filter,
+the cash path's team filter, and the AUDIT, which otherwise rejects every
+relaxed lineup.
+
+**It did not open up combinations, in either regime:**
+
+    9-game card   minspend49 110 -> fillopp49 108
+                  stack554   112 -> fillopp554 113
+    3-game card   minspend49  36 -> fillopp49  36
+
+On a big slate, banning 2 of 18 teams was never the constraint. On a thin
+slate the wall is `try_build_cash`'s near-argmax fill (top-2 by avg26), which
+converges on the same bats however many teams are legal -- widening the pool
+cannot route around it.
+
+**And where it did change construction, it cost the ceiling.** 23 slates x 3
+seeds:
+
+    variant       bestAvg  gapAvg  top10    sd   dBest   SE     t    dMean
+    control         143.0   -9.85   11.7  25.0      --    --    --      --
+    minspend49      148.2   -4.61   18.7  26.0    +5.2   1.7  3.09    +2.2
+    fillopp49       142.9   -9.91   16.7  25.3    -0.1   2.0 -0.03    +2.7
+    fillopp554      146.4   -6.38   16.0  26.3    +3.5   2.0  1.71    +1.9
+
+`fillopp49` gives back the arm's ENTIRE edge -- back to control on both
+bestAvg and gap. Note its dMean is **+2.7, the highest of any arm measured**,
+while dBest is -0.1: letting fills oppose our SP raises the average lineup and
+destroys the top one. That is the negative correlation working exactly as
+theory says -- the opposing bat's hits are our pitcher's runs, so they cancel
+-- and it is the cleanest floor-for-ceiling example in this file.
+
+So the ban is not DFS folklore we inherited; it is worth ~5 points of `best`.
+Kept behind `--fill-may-oppose`, default off.
+
+## Cross-arm fill: use a SECOND arm for the shortfall instead of duplicating
+
+User's idea, 09/07. When a slate caps the portfolio below the entry count, the
+remaining rows get duplicates -- and a duplicate is worth ZERO extra draws,
+since it scores identically. A distinct lineup from a different arm is worth
+one. Done live on 09/07 (6 games, 80 entries):
+
+    before:  71 distinct + 9 duplicates   71 effective draws   79 hitters
+    after:   79 distinct + 1 duplicate    79 effective draws   83 hitters
+
+The donors were `stack554` lineups, merged only if they were not already
+present AND did not push any player past ABSOLUTE_SP_CAP or FILL_CAP over the
+COMBINED portfolio -- which is why 8 of 9 slots filled rather than 9. Top SP
+after the merge was 29/79 = 36.7%, inside the 40% cap. All 79 pass the audit
+independently.
+
+Why it is defensible rather than a hack: stack554 and minspend49 are a
+measured dead heat (+0.18, t 0.08 over 14 dates), so the marginal lineups are
+not worse in expectation, and "more draws" is the strongest lever in this file
+(20 -> 40 lineups took the top-10 hit rate 0.062 -> 0.250). The donors are
+5-stack constructions, so the tail of the portfolio runs hotter than the rest.
+
+NOT YET REPLAYED. The merge is a portfolio-assembly step rather than a builder
+arm, so the harness cannot test it as-is -- it would need to build two arms
+per (slate, seed) and merge before scoring. Queued as the next test. Until
+then this is a live technique with sound reasoning and no measurement.
+
+**Attribution:** the upload keeps the `_minspend49` filename while containing
+8 stack554 lineups. Those still hash exactly (builder output, not hand
+edits), but 09/07 is NOT a clean minspend49 slate and should not be counted as
+one.
+
 ## Can we pick the team to stack? Measured: barely, and that is the ceiling
 
 384 team-slates over 24 slates. Predictor from the frozen snapshot, target the
