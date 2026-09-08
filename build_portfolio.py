@@ -291,6 +291,12 @@ VARIANTS = {
     # 09/03) and without it the shipped build would quietly come up short.
     "minspend49": {"score": None, "top": 1, "min_total_salary": 49000,
                    "hard_min_salary": True, "seeds": 8},
+    # The shipped arm PLUS the thin-slate coverage guarantee. Identical to
+    # minspend49 on any card over 4 games -- the guarantee simply does not
+    # fire -- so this is a strict superset, not a different builder.
+    "minspend49cov": {"score": None, "top": 1, "min_total_salary": 49000,
+                      "hard_min_salary": True, "seeds": 8,
+                      "all_team_five": True},
     # Sweep levels around the shipped 49,000. The winners sit at 49,715, so
     # "closer to where they sit" is the obvious next question -- but a floor
     # this tight starves construction, and the refill can only recover what
@@ -894,7 +900,7 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
     return alloc, impl, fades
 
 
-def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None):
+def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1):
     """Tier assignment: ~20% ceiling, ~20% contrarian, rest core.
 
     `sizes` is (ceiling, core, contrarian) stack sizes.
@@ -918,18 +924,35 @@ def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None):
     ceil_sz, core_sz, cont_sz = sizes
     guaranteed = []
     if all_teams:
-        seen = set()
+        # `per` lineups per team, ROUND-ROBIN rather than team-by-team. When a
+        # slate underfills -- 09/07 delivered 30 of 67 -- the builder walks the
+        # spec list in order and whatever sits at the back is never attempted.
+        # Blocking by team would give the first team all `per` of its lineups
+        # and the last team none, which is the same silent-tail problem that
+        # left SF and ATH at zero in the first place.
+        seen, uniq = set(), []
         for t in all_teams:
             if t not in seen:
                 seen.add(t)
+                uniq.append(t)
+        for k in range(per_team):
+            for t in uniq:
                 guaranteed.append({"stack": t, "tier": "CEILING", "size": 5})
-        # The guarantee consumes lineups; the normal allocation fills what is
-        # left, so a slate with more teams than entries gets coverage only.
+        guaranteed = guaranteed[:max(0, n_lineups)]
         n_lineups = max(0, n_lineups - len(guaranteed))
         if n_lineups == 0:
-            return guaranteed[:len(guaranteed)]
+            return guaranteed
     n_ceil = max(1, round(n_lineups * 0.2))
     n_cont = max(1, round(n_lineups * 0.2))
+    # REVERTED 09/07. Round-robin interleaving of the allocation looked like a
+    # fix for the silent tail (SF got 0 stacks on a slate that underfilled),
+    # but it is emitted in BLOCK order for a reason: the tier ladder below
+    # assigns CEILING to the first n_ceil specs and CONTRARIAN to the last
+    # n_cont, so interleaving scatters the tiers across teams instead of
+    # giving the best offences the ceiling slots. Measured cost to the SHIPPED
+    # arm: dBest vs control fell +5.2 (t 3.09) to -1.1 (t -0.67), bestAvg
+    # 148.2 -> 141.5, across 23 slates. Do not re-apply without re-working the
+    # tier assignment at the same time.
     stack_list = [t for t, n in alloc.items() for _ in range(n)]
     specs, first_seen = [], set()
     for idx, team in enumerate(stack_list):
@@ -1688,6 +1711,14 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--all-team-five-max-games", type=int, default=None,
+                    help="only guarantee per-team 5-stacks at or below this "
+                         "many games (default 4). It measured +8.42 on thin "
+                         "cards and NEGATIVE on 5+ game slates")
+    ap.add_argument("--all-team-five-per", type=int, default=None,
+                    help="how many guaranteed 5-stacks EACH team gets "
+                         "(default 1). They are emitted round-robin, so a "
+                         "slate that underfills still covers every team")
     ap.add_argument("--all-team-five", action="store_true",
                     help="guarantee EVERY team on the slate one 5-stack "
                          "before the normal allocation, overriding the fade. "
@@ -1821,7 +1852,26 @@ def main():
     # Guarantee every team one 5-stack, best offences first so that a slate
     # with fewer entries than teams still covers the likeliest ones.
     _allteams = None
-    if _cfg0.get("all_team_five") or args.all_team_five:
+    _perteam = (_cfg0.get("all_team_five_per", 1) if args.all_team_five_per
+                is None else args.all_team_five_per)
+    # Guarantee every team a 5-stack ONLY on a thin card. Measured 09/07,
+    # 23 slates x 3 seeds, against the shipped minspend49:
+    #
+    #     depth        pairs   dBest     t     better/worse
+    #     <=4 games        9   +8.42  +3.73      7 / 0
+    #     5-7 games       24   -4.99  -1.83      9 / 15
+    #     8+ games        36   -2.81  -1.18     13 / 20
+    #
+    # The mechanism is the cost of the guarantee, not its benefit: on a
+    # 6-team card covering every team costs 6 lineups and insures the whole
+    # slate, while on an 18-team card it costs 18 and spends most of them on
+    # offences the allocator rates near the bottom. It loses on deep slates
+    # even though it builds 5-13 MORE lineups there.
+    _guar_max_games = (_cfg0.get("all_team_five_max_games", SMALL_SLATE_GAMES)
+                       if args.all_team_five_max_games is None
+                       else args.all_team_five_max_games)
+    if ((_cfg0.get("all_team_five") or args.all_team_five)
+            and n_games <= _guar_max_games):
         _byimpl = sorted({h["team"] for h in hit_pool},
                          key=lambda t: -(vegas.loc[t, "implied_total"]
                                          if t in vegas.index else 0.0))
@@ -1841,7 +1891,7 @@ def main():
         print("max-correlation: stack sizes %s" % (sizes,))
     if len(sizes) != 3:
         sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
-    specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams)
+    specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams, per_team=_perteam)
     fade_reserved = defaultdict(int)
     for spec in specs:
         if spec["stack"] in fades:
@@ -1950,7 +2000,7 @@ def main():
             # to the shortfall or the refill builds a second full portfolio.
             # Rotate the start each pass so successive seeds refill different
             # teams rather than hammering the top of the allocation.
-            full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams)
+            full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams, per_team=_perteam)
             off = (k * short) % max(1, len(full))
             more = (full + full)[off:off + short]
             before = len(b.lineups)
