@@ -324,6 +324,26 @@ VARIANTS = {
     "allteam5nofade": {"score": None, "top": 1, "min_total_salary": 49000,
                        "hard_min_salary": True, "seeds": 8,
                        "all_team_five": True, "fade_sp_bs": 999},
+    # ---- ISOLATE THE SALARY FLOOR, 09/09 ---------------------------------
+    # 09/08's three biggest contests were won at 46,700 / 46,700 / 44,700 --
+    # ALL BELOW the 49,000 hard floor, so minspend49 could not have built any
+    # of them. TEX was implied 3.25, so DK priced their bats cheap (Langford
+    # 4,400 / Seager 4,200 / Lopez 2,200) and then they erupted. That is the
+    # second time the floor has been implicated in deleting the day's best
+    # construction (08/30's best lineup cost 46,500).
+    #
+    # The floor cannot be scored against `control`, which also lacks the
+    # seeds:8 refill and the coverage guarantee -- that comparison credits
+    # the floor with extra draws. covnofloor is minspend49cov with the floor
+    # and ONLY the floor removed, so dBest is the floor's own effect.
+    "covnofloor": {"score": None, "top": 1, "seeds": 8,
+                   "all_team_five": True},
+    "minspend47cov": {"score": None, "top": 1, "min_total_salary": 47000,
+                      "hard_min_salary": True, "seeds": 8,
+                      "all_team_five": True},
+    "minspend485cov": {"score": None, "top": 1, "min_total_salary": 48500,
+                       "hard_min_salary": True, "seeds": 8,
+                       "all_team_five": True},
     # ---- DEEP-slate coverage floor, built 09/08 --------------------------
     # 09/08 dropped TOR and TEX from a 10-game card entirely (their lineups
     # had not posted) and TEX then scored 9 runs by the 6th. 09/07 dropped
@@ -345,6 +365,15 @@ VARIANTS = {
     "cover4": {"score": None, "top": 1, "min_total_salary": 49000,
                "hard_min_salary": True, "seeds": 8,
                "all_team_five": True, "cover_min_size": 4},
+    # cover5 is the unconditional per-team 5-stack guarantee, which measured
+    # -2.81 on deep slates in the 09/07 sweep -- but that test was NOT
+    # equal-size: it built 5-13 MORE lineups, because the guarantee was added
+    # to the allocation instead of spent from it. With the budget fix this is
+    # a clean re-test at dN 0, and the cover2/3/4 ordering (bigger loses
+    # less) says it is the one worth re-running.
+    "cover5": {"score": None, "top": 1, "min_total_salary": 49000,
+               "hard_min_salary": True, "seeds": 8,
+               "all_team_five": True, "cover_min_size": 5},
     # ---- batting order on fills, RETESTED 09/07 --------------------------
     # The block above rejected bo6 on 9 slates against minspend47, with the
     # paired verdict computed on dMean -- the same defect that made the

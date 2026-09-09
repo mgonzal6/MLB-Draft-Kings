@@ -1178,12 +1178,105 @@ POOL, which is the preflight gate's job, and that gate costs construction
 nothing. Do not reach for the coverage floor when the actual defect is
 upstream of the allocator.
 
+**cover5 re-tested at EQUAL SIZE, 09/09, and it loses too.** The user asked
+to keep 5-stacks rather than shrink them, which is the right question: the
+cover2/3/4 ordering said bigger loses less, and the previous verdict on the
+unconditional 5-stack guarantee (-2.81 on deep slates) was measured while the
+arm was quietly building 5-13 EXTRA lineups. So it lost with a handicap in
+its favour and had never been scored at dN 0. 25 slates x 5 seeds:
+
+    arm             bestAvg  gapAvg  top10
+    minspend49cov     146.4   -4.55   23.8
+    cover4            144.5   -6.46   21.0
+    cover5            144.5   -6.50   20.2
+
+    collapsed, vs minspend49cov:
+    cover4  mid -0.53 t +0.27 (3/3)   deep -2.91 t -1.81 (2/6)
+    cover5  mid -2.01 t -0.98 (2/4)   deep -1.67 t -0.93 (3/5)
+
+At dN 0 it reads -1.67 instead of -2.81, so most of the old number WAS the
+free draws -- but the sign does not change and top-10 count is the worst of
+the whole family (20.2 against 23.8). Thin slates come back exactly 0.00 with
+SE 0.00 on every pair, so the slate-size condition is holding.
+
+That closes the coverage question in both directions: cheap coverage loses,
+and expensive coverage that preserves the 5-stack shape loses too.
+
 Kept behind `--cover-min-size`, default 0 (off). NOT shipped.
 
 Note the run lost `09_06_2026` entirely -- 25 build failures, 5 seeds x 5
 arms, so every arm lost it equally and the pairing stays valid, but the set
 is 24 slates / 15 dates rather than 25. Unexplained; not the cash-path
 failure, and worth a separate look.
+
+## The salary floor is LOAD-BEARING, and it pays MOST on deep slates
+
+Tested 09/09 because 09/08's three biggest contests were won at 46,700,
+46,700 and 44,700 -- ALL BELOW the 49,000 hard floor, so minspend49 could not
+have built any of them. TEX was implied 3.25, DK priced their bats cheap
+(Langford 4,400 / Seager 4,200 / Carter 2,800 / Lopez 2,200) and then they
+erupted. It is a compelling observation and it WILL look compelling again, so
+this entry exists to stop it being re-litigated.
+
+The floor cannot be scored against `control`, which also lacks the seeds:8
+refill and the coverage guarantee -- that comparison credits the floor with
+extra draws. `covnofloor` is minspend49cov with the floor and ONLY the floor
+removed. 25 slates x 5 seeds, collapsed to dates:
+
+    depth        dates   dBest    SE      t    better/worse
+    thin <=4        3    +2.36   4.30   +0.55      2 / 1
+    mid 5-7         6    -3.79   1.46   -2.59      0 / 6
+    deep 8+         8    -4.08   1.60   -2.55      2 / 6
+
+    pooled: bestAvg 146.4 -> 143.6   gap -4.55 -> -7.40   top10 23.8 -> 18.8
+
+**Removing the floor costs 4.08 points of `best` on deep slates and loses on
+ALL SIX mid-slate dates.** It is the strongest single-component result
+measured here, and it runs opposite to the hypothesis that motivated the
+test.
+
+**On 09/08 itself -- the slate that motivated it -- covnofloor scores +0.1.**
+Removing the floor would have gained nothing on the night it looked most
+culpable. The winners were cheap AND had TEX; we had no TEX, and the price
+point was incidental to that. Do not infer a floor problem from a cheap
+winning lineup.
+
+This also resolves an earlier confound: minspend49cov vs control split by
+depth reads +4.67 on deep slates (6 of 7 dates), and the isolation shows that
+is the floor, not the seeds:8 refill.
+
+**The LEVEL is still flat, confirming the original plateau.**
+`minspend485cov` (48,500) vs the shipped 49,000:
+
+    thin  +4.30 t +0.81 (1/2)   mid -1.03 t -0.50 (2/4)   deep +0.29 t +0.46 (4/3)
+    pooled bestAvg 146.7 vs 146.4, top10 22.4 vs 23.8
+
+Same answer as the first level sweep (48,500 +3.06, 49,000 +3.08). A floor is
+load-bearing; its exact height is not. So lowering it to make room for a
+46,700 winner buys almost nothing -- the binding constraint sits well below
+48,500.
+
+Both arms kept as `covnofloor` / `minspend485cov`, default off.
+
+## The harness silently fails to build 09_06 and 09_08
+
+Flagged 09/09, NOT diagnosed. Across three sweeps (~1,600 builds) every arm
+fails every seed on exactly two snapshots:
+
+    09_06_2026:  9 games, 180 DK players
+    09_08_2026: 10 games, 200 DK players
+
+40 failures total. Both are DEEP slates, and 09_08 is the card that motivated
+all of the 09/08-09/09 work -- so the slate the coverage and floor questions
+came FROM contributed nothing to measuring either. `09_08_2026` builds 77
+lineups fine in production, so this is a harness-side failure, not a slate
+property.
+
+It hits all arms equally, so no comparison above is invalidated -- but it is
+the same silent set-shrinkage the parallelism entry warns about, arriving a
+third time. The deep 8+ cell is the noisiest one in every depth split and it
+is missing two of its members. Read the build-failure count before the
+results table, every time.
 
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
