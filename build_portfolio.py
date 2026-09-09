@@ -324,6 +324,27 @@ VARIANTS = {
     "allteam5nofade": {"score": None, "top": 1, "min_total_salary": 49000,
                        "hard_min_salary": True, "seeds": 8,
                        "all_team_five": True, "fade_sp_bs": 999},
+    # ---- DEEP-slate coverage floor, built 09/08 --------------------------
+    # 09/08 dropped TOR and TEX from a 10-game card entirely (their lineups
+    # had not posted) and TEX then scored 9 runs by the 6th. 09/07 dropped
+    # ATH by fade and ATH erupted. Two days, two unreachable teams, both of
+    # which went off -- and neither was predictable: TEX was #16 of 20 by
+    # implied total, ATH #12, and implied_total correlates only +0.130 with
+    # team output within-slate.
+    #
+    # The 5-stack guarantee already fixes this on <=4-game cards (+8.42) and
+    # LOSES on deep ones (-2.81), because covering 18 teams with 5-stacks
+    # spends 18 lineups on the worst-rated offences. These arms buy the same
+    # coverage at 2, 3 or 4 roster spots instead of 5.
+    "cover2": {"score": None, "top": 1, "min_total_salary": 49000,
+               "hard_min_salary": True, "seeds": 8,
+               "all_team_five": True, "cover_min_size": 2},
+    "cover3": {"score": None, "top": 1, "min_total_salary": 49000,
+               "hard_min_salary": True, "seeds": 8,
+               "all_team_five": True, "cover_min_size": 3},
+    "cover4": {"score": None, "top": 1, "min_total_salary": 49000,
+               "hard_min_salary": True, "seeds": 8,
+               "all_team_five": True, "cover_min_size": 4},
     # ---- batting order on fills, RETESTED 09/07 --------------------------
     # The block above rejected bo6 on 9 slates against minspend47, with the
     # paired verdict computed on dMean -- the same defect that made the
@@ -962,7 +983,7 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
 
 
 def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
-                tier_by_count=False):
+                tier_by_count=False, guar_size=5):
     """Tier assignment: ~20% ceiling, ~20% contrarian, rest core.
 
     `sizes` is (ceiling, core, contrarian) stack sizes.
@@ -982,6 +1003,13 @@ def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
     Distinct from stack554, which forced big stacks but still allocated teams
     by stackscore -- it concentrated on the teams we already liked. This
     guarantees a coverage floor first.
+
+    `guar_size` is the stack size of those guaranteed specs (default 5). A
+    SMALLER guarantee is the deep-slate variant: covering 18 teams with
+    5-stacks costs 18 lineups on offences the allocator rates last and
+    measured negative (-2.81 on 8+ games), but covering them with 3-stacks
+    costs the same lineup count at a fraction of the roster commitment. See
+    the cover* variants.
     """
     ceil_sz, core_sz, cont_sz = sizes
     guaranteed = []
@@ -999,7 +1027,8 @@ def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
                 uniq.append(t)
         for k in range(per_team):
             for t in uniq:
-                guaranteed.append({"stack": t, "tier": "CEILING", "size": 5})
+                guaranteed.append({"stack": t, "tier": "CEILING",
+                                   "size": int(guar_size)})
         guaranteed = guaranteed[:max(0, n_lineups)]
         n_lineups = max(0, n_lineups - len(guaranteed))
         if n_lineups == 0:
@@ -1802,6 +1831,15 @@ def main():
                     help="how many guaranteed 5-stacks EACH team gets "
                          "(default 1). They are emitted round-robin, so a "
                          "slate that underfills still covers every team")
+    ap.add_argument("--cover-min-size", type=int, default=None,
+                    help="deep-slate coverage floor: guarantee every team a "
+                         "stack of THIS size when the slate is bigger than "
+                         "--all-team-five-max-games. 0 disables (default). "
+                         "Built 09/08 after TOR and TEX were dropped from a "
+                         "10-game card entirely and TEX put up 9 runs")
+    ap.add_argument("--cover-min-per", type=int, default=None,
+                    help="how many guaranteed coverage stacks each team gets "
+                         "on a deep slate (default 1), emitted round-robin")
     ap.add_argument("--all-team-five", action="store_true",
                     help="guarantee EVERY team on the slate one 5-stack "
                          "before the normal allocation, overriding the fade. "
@@ -1955,13 +1993,45 @@ def main():
     _guar_max_games = (_cfg0.get("all_team_five_max_games", SMALL_SLATE_GAMES)
                        if args.all_team_five_max_games is None
                        else args.all_team_five_max_games)
+    _guar_size = 5
+    _deepcover = False
+    _covmin = int(_cfg0.get("cover_min_size", 0) if args.cover_min_size is None
+                  else args.cover_min_size)
     if ((_cfg0.get("all_team_five") or args.all_team_five)
             and n_games <= _guar_max_games):
         _byimpl = sorted({h["team"] for h in hit_pool},
                          key=lambda t: -(vegas.loc[t, "implied_total"]
                                          if t in vegas.index else 0.0))
         _allteams = _byimpl
-    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, n_gpp, opp_map,
+    elif _covmin > 0 and n_games > _guar_max_games:
+        # DEEP-slate coverage floor. The 5-stack guarantee loses here (-2.81
+        # on 8+ games) because it spends one whole lineup per team on the
+        # offences the allocator rates last. A 3-stack costs the same lineup
+        # but commits three roster spots instead of five, leaving the fill
+        # loop free -- the question this sweep exists to answer is whether
+        # that is enough to be worth the coverage.
+        _byimpl = sorted({h["team"] for h in hit_pool},
+                         key=lambda t: -(vegas.loc[t, "implied_total"]
+                                         if t in vegas.index else 0.0))
+        _allteams = _byimpl
+        _guar_size = _covmin
+        _deepcover = True
+        _perteam = int(_cfg0.get("cover_min_per", 1)
+                       if args.cover_min_per is None else args.cover_min_per)
+        print(f"\ndeep-slate coverage floor: every team gets "
+              f"{_perteam} {_guar_size}-stack ({len(_byimpl)} teams)")
+    # The coverage floor SPENDS part of the lineup budget rather than adding
+    # to it. make_specs emits one spec per allocated stack regardless of its
+    # n_lineups argument, so prepending a guarantee without shrinking the
+    # allocation delivers n_teams EXTRA lineups -- which is how the
+    # unconditional 5-stack guarantee came to build "5-13 more lineups" on
+    # mid and deep slates. Free draws are the single strongest lever in this
+    # file (20 -> 40 took the top-10 rate 0.062 -> 0.250), so an arm that
+    # quietly buys some cannot be compared against one that does not.
+    _alloc_n = n_gpp
+    if _deepcover and _allteams:
+        _alloc_n = max(1, n_gpp - min(n_gpp, len(_allteams) * _perteam))
+    alloc, impl, fades = allocate_stacks(hit_pool, sp_df, vegas, _alloc_n, opp_map,
                                          max_stacks=args.max_stacks,
                                          fade_sp_bs=_fsb)
     print(f"\nHard fades (≤25% appearances): {sorted(fades)}")
@@ -1977,7 +2047,7 @@ def main():
     if len(sizes) != 3:
         sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
     specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams, per_team=_perteam,
-                       tier_by_count=_tierbycount)
+                       tier_by_count=_tierbycount, guar_size=_guar_size)
     # The DELIVERED tier mix can drift from this, because a spec that cannot
     # build is dropped and the seed refill pulls a different slice of the
     # list. Print both so the two are never confused again: CEILING read 5.2%
@@ -2097,6 +2167,7 @@ def main():
             # Rotate the start each pass so successive seeds refill different
             # teams rather than hammering the top of the allocation.
             full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams, per_team=_perteam,
+                              guar_size=_guar_size,
                        tier_by_count=_tierbycount)
             off = (k * short) % max(1, len(full))
             more = (full + full)[off:off + short]

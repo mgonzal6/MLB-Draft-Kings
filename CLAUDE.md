@@ -1121,6 +1121,70 @@ because it changes no lineup. That is the point.
 prints `teams with anything confirmed: N`. If N is below the slate team
 count, a whole offence is gone, and the SP line will understate it.
 
+## The deep-slate COVERAGE FLOOR measured worse. Do not re-propose it.
+
+Built 09/08 in response to two days of unreachable teams erupting (ATH by
+fade 09/07, TOR and TEX by unposted lineups 09/08). The idea was the cheap
+version of the guarantee that already works on thin cards: not "every team
+gets a 5-stack" -- which costs one lineup per team and measured -2.81 on
+deep slates -- but "no team finishes with ZERO", satisfied by a 2, 3 or
+4-stack. `--cover-min-size N`, firing only above --all-team-five-max-games.
+
+The budget matters and nearly went unnoticed: `make_specs` emits one spec per
+allocated stack regardless of its n_lineups argument, so prepending a
+guarantee ADDS n_teams lineups rather than spending them. The first build
+returned 95 lineups on a request of 77. Since draws are the strongest lever
+in this file (20 -> 40 took the top-10 rate 0.062 -> 0.250), that would have
+won the sweep for the wrong reason. The floor now shrinks the allocation by
+what it consumes. This is also the mechanism behind the note that the
+unconditional 5-stack guarantee "built 5-13 MORE lineups" on mid/deep slates
+-- those comparisons were not equal-size.
+
+24 slates x 5 seeds, 625 builds, collapsed to the 15 distinct dates:
+
+    arm        vs minspend49cov   SE     t    better/worse   dTop10
+    cover2          -3.30        1.79  -1.84     4 / 9        -0.14
+    cover3          -3.08        1.79  -1.72     3 / 10       -0.23
+    cover4          -1.13        1.33  -0.85     4 / 9        +0.00
+    control         -4.27        0.96  -4.44     1 / 14       -0.30
+
+    pooled vs control:  minspend49cov +4.4 t 3.64   cover3 +0.1 t 0.09
+    bestAvg 147.0 -> 142.7   gapAvg -5.06 -> -9.37   top10 22.0 -> 15.0
+
+**cover3 gives back three quarters of the shipped arm's edge.** None of the
+three reaches |t| 2 against minspend49cov, so strictly they are "not
+separable" -- but the direction is consistent (9-10 of 13 decisive dates
+worse) and the control row confirms the harness is measuring correctly.
+
+And it is the same signature as every dead constraint here: **dMean UP
+(+2.4) while dBest collapses.** Floor for ceiling, on an objective that is
+purely ceiling. The ordering cover4 > cover3 > cover2 says bigger coverage
+stacks lose LESS, consistent with the standing finding that the ceiling comes
+from maximum concentration on one team.
+
+**Why this does not contradict the 09/08 field data.** That slate showed a
+TEX 4-stack converting to a top-10 at 28.6% against 0.56% for lineups with no
+TEX -- a 51x swing, on a team implied 3.25 (#16 of 20). That is real and it
+is hindsight. The floor cannot know which team will erupt, so it buys ~18
+tickets and pays for them by giving up concentration on the teams the
+allocator does rate. Seventeen of the eighteen are wrong. Same wall as every
+other route around team selection: implied_total is +0.130 and nothing else
+reads above zero.
+
+**The distinction that matters: 09/08 was NOT a coverage-allocation failure.**
+Once TEX was in the pool, the normal allocation gave them four 3+ stacks with
+no help at all -- cover3 produced the SAME four. TEX was missing from the
+POOL, which is the preflight gate's job, and that gate costs construction
+nothing. Do not reach for the coverage floor when the actual defect is
+upstream of the allocator.
+
+Kept behind `--cover-min-size`, default 0 (off). NOT shipped.
+
+Note the run lost `09_06_2026` entirely -- 25 build failures, 5 seeds x 5
+arms, so every arm lost it equally and the pairing stays valid, but the set
+is 24 slates / 15 dates rather than 25. Unexplained; not the cash-path
+failure, and worth a separate look.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
