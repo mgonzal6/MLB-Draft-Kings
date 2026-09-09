@@ -11,8 +11,16 @@ costs nothing but a few milliseconds.
 
 Exit codes:
     0  enough is confirmed to build (possibly with a partial-slate warning)
-    1  nothing confirmed yet -- do not spend the odds call
+    1  nothing confirmed yet, or a slate TEAM is entirely unposted
     2  input files missing or unreadable
+
+On 09/08 the 15:43 feed had 18 of 20 teams posted. The build ran anyway and
+TOR -- the highest implied total on the slate (5.50) facing the weakest
+starter on it (adj_bs -7.21) -- appeared in ZERO of 77 lineups, along with
+TEX. Nothing said "you have dropped two teams"; it printed "only 18 of 20
+SPs confirmed", which reads like two missing ARMS rather than two missing
+OFFENCES. The 9:40 PM ET games had not locked for another 5.9 hours, so
+waiting was free. See check_team_coverage.
 """
 import os
 import re
@@ -85,6 +93,44 @@ def slate_teams(dk):
     if dk is None or "TeamAbbrev" not in dk.columns:
         return None
     return set(dk["TeamAbbrev"].astype(str).str.strip().str.upper())
+
+
+def team_games(dk):
+    """{team: (game string, start datetime ET)} for every slate team."""
+    out = {}
+    if dk is None:
+        return out
+    for _, r in dk.iterrows():
+        team = str(r.get("TeamAbbrev", "")).strip().upper()
+        if not team or team in out:
+            continue
+        gi = str(r.get("Game Info", ""))
+        m = re.search(r"(\d{2}/\d{2}/\d{4})\s+(\d{1,2}:\d{2}(?:AM|PM))", gi)
+        dt = None
+        if m:
+            try:
+                dt = datetime.strptime(f"{m.group(1)} {m.group(2)}",
+                                       "%m/%d/%Y %I:%M%p").replace(tzinfo=_ET)
+            except ValueError:
+                dt = None
+        out[team] = (gi, dt)
+    return out
+
+
+def check_team_coverage(lu, cf, on_slate):
+    """Slate teams with NO confirmed player at all.
+
+    A team whose lineup has not posted is not merely 'missing a starter' --
+    every one of its bats is excluded from the hitter pool, so it cannot
+    appear in a single lineup. On a 20-team card two such teams is a 10% cut
+    to the slate, applied silently and with no signal behind it. The fade
+    rules at least act on a number; this acts on a file's timestamp.
+    """
+    if not on_slate:
+        return []
+    have = set(lu.loc[cf == "Y", "team code"].astype(str).str.strip()
+               .str.upper().replace(ABBR_REMAP))
+    return sorted(set(on_slate) - have)
 
 
 def first_pitch(dk):
@@ -198,6 +244,48 @@ def main():
         print(f"  NOTE: only {n_sp_conf} of {n_sp} SPs confirmed -- the later")
         print("        games have not posted. The build will use what is")
         print("        confirmed; rerun after the rest post for a full slate.")
+
+    # A missing SP costs one arm. A missing TEAM costs an entire offence, and
+    # that is the one this gate exists for -- see the module docstring.
+    missing = check_team_coverage(lu, cf, on_slate)
+    if missing:
+        tg = team_games(dk)
+        now_et = datetime.now(tz=_ET)
+        print()
+        print("  " + "*" * 58)
+        print(f"  *** {len(missing)} OF {len(on_slate)} SLATE TEAMS HAVE NO "
+              f"CONFIRMED PLAYER:")
+        print(f"  ***   {', '.join(missing)}")
+        print("  ***")
+        print("  *** Every one of their bats is excluded from the hitter pool.")
+        print("  *** They cannot appear in a single lineup -- this is not a")
+        print("  *** fade, it is a file that was pulled too early.")
+        for t in missing:
+            gi, dt = tg.get(t, ("", None))
+            if dt is None:
+                print(f"  ***   {t}: {gi}")
+                continue
+            hrs = (dt - now_et).total_seconds() / 3600
+            when = dt.strftime("%I:%M %p ET").lstrip("0")
+            if hrs > 0:
+                print(f"  ***   {t}: starts {when} -- {hrs:.1f}h away, "
+                      f"waiting is free")
+            else:
+                print(f"  ***   {t}: started {when} -- ALREADY LOCKED")
+        print("  " + "*" * 58)
+        if slate_io.allow_unconfirmed():
+            print()
+            print("  DK_ALLOW_UNCONFIRMED is set, so the build will use")
+            print("  PROJECTED batting orders for those teams. Those are")
+            print("  guesses; rebuild or late-swap once the lineups post.")
+        else:
+            print()
+            print("  *** STOPPING. Choose one:")
+            print("      - wait for those lineups to post, re-download, rerun")
+            print("      - set DK_ALLOW_UNCONFIRMED=1 to build on projected")
+            print("        orders now and late-swap after they post")
+            print("-" * 60)
+            return 1
 
     print("-" * 60)
     return 0

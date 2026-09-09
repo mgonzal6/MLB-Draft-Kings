@@ -301,6 +301,16 @@ VARIANTS = {
     # "closer to where they sit" is the obvious next question -- but a floor
     # this tight starves construction, and the refill can only recover what
     # the pool can actually build.
+    # ---- CEILING tagged by count, not list position ----------------------
+    # The tier configured for ~20% of the portfolio delivers 5.2% (4.1% over
+    # 919 historical entries), because `idx < n_ceil` runs against a BLOCK
+    # ordered spec list -- the first n_ceil positions are two or three teams
+    # repeated and only their first spec qualifies. Counting qualifying specs
+    # instead delivers 20.8%, and because 5-stacks live only in CEILING under
+    # sizes=(5,4,3), the 5-stack share doubles 18.2% -> 36.4%.
+    "tiercount": {"score": None, "top": 1, "min_total_salary": 49000,
+                  "hard_min_salary": True, "seeds": 8,
+                  "all_team_five": True, "tier_by_count": True},
     # ---- guarantee every team a 5-stack ----------------------------------
     # User's design, 09/07, after ATH was hard-faded for facing Cease and then
     # scored 4 runs off him while we held zero ATH exposure across 36 lineups.
@@ -745,6 +755,57 @@ def build_sp_pool(dk, lu, padj, opp_map, n_lineups,
     return sp_df, caps, med, min(feasible, n_lineups)
 
 
+def report_missing_teams(dk, hit_pool, vegas=None):
+    """Name every slate team that contributed ZERO hitters to the pool.
+
+    DIAGNOSTIC ONLY -- prints, changes no construction, touches no counter.
+
+    It exists because the builder is otherwise silent about this and the cost
+    is not small. On 09/08 the 15:43 lineups feed had 18 of 20 teams posted,
+    so TOR and TEX were dropped from the hitter pool entirely and appeared in
+    none of the 77 entered lineups. TOR had the slate's HIGHEST implied total
+    (5.50) and faced its WEAKEST starter (Jack Perkins, adj_bs -7.21). The
+    only warning printed was "only 18 of 20 SPs confirmed", which reads like
+    two missing arms rather than two missing offences.
+
+    preflight.py gates on the same condition and stops the run, but the
+    replay harness and any direct builder call skip preflight, so the warning
+    is repeated at the one place the pool actually exists.
+    """
+    try:
+        on_slate = set(dk["TeamAbbrev"].astype(str).str.strip().str.upper())
+        have = {str(h["team"]).strip().upper() for h in hit_pool}
+    except Exception:
+        return
+    missing = sorted(on_slate - have)
+    if not missing:
+        return
+    order = []
+    if vegas is not None:
+        try:
+            order = list(vegas["implied_total"].astype(float)
+                         .sort_values(ascending=False).index)
+        except Exception:
+            order = []
+    print()
+    print("  " + "!" * 60)
+    print(f"  !! {len(missing)} of {len(on_slate)} slate teams contributed NO "
+          f"hitters to the pool:")
+    for t in missing:
+        note = ""
+        if t in order:
+            try:
+                note = (f"  implied {float(vegas.loc[t, 'implied_total']):.2f}"
+                        f"  (#{order.index(t) + 1} of {len(order)} on the slate)")
+            except Exception:
+                note = ""
+        print(f"  !!   {t}{note}")
+    print("  !! Not a fade -- their lineups were unposted when the feed was")
+    print("  !! pulled. They cannot appear in ANY lineup. If those games have")
+    print("  !! not locked, rebuild once the lineups post.")
+    print("  " + "!" * 60)
+
+
 def build_hitter_pool(dk, lu, hcache, opp_map, vegas=None):
     r"""...plus `own_pct`, a projected-ownership percentile.
 
@@ -900,7 +961,8 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
     return alloc, impl, fades
 
 
-def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1):
+def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
+                tier_by_count=False):
     """Tier assignment: ~20% ceiling, ~20% contrarian, rest core.
 
     `sizes` is (ceiling, core, contrarian) stack sizes.
@@ -954,10 +1016,24 @@ def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1):
     # 148.2 -> 141.5, across 23 slates. Do not re-apply without re-working the
     # tier assignment at the same time.
     stack_list = [t for t, n in alloc.items() for _ in range(n)]
-    specs, first_seen = [], set()
+    # CEILING is tagged by COUNT, not by index. It used to be `idx < n_ceil
+    # and team not in first_seen`, but the list is in block order -- all of
+    # MIL's ten lineups, then TOR's five -- so the first n_ceil positions are
+    # two or three teams repeated and only their first spec qualified. The
+    # tier configured for ~20% of the portfolio was delivering 5.2% (and
+    # 4.1% over 919 historical entries). Counting qualifying specs instead
+    # keeps the intent -- one ceiling lineup per team, spread across the best
+    # offences -- while actually producing n_ceil of them.
+    #
+    # This matters beyond the label: in the default sizes=(5,4,3), 5-stacks
+    # live ONLY in CEILING, so the tier under-delivering is most of why the
+    # portfolio runs ~18% 5-stacks against a field of 50.3%.
+    specs, first_seen, n_tagged = [], set(), 0
     for idx, team in enumerate(stack_list):
-        if idx < n_ceil and team not in first_seen:
+        _ceil_ok = (n_tagged < n_ceil if tier_by_count else idx < n_ceil)
+        if _ceil_ok and team not in first_seen:
             tier, size = "CEILING", ceil_sz
+            n_tagged += 1
         elif idx >= len(stack_list) - n_cont:
             tier, size = "CONTRARIAN", cont_sz
         else:
@@ -1713,6 +1789,11 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--tier-by-count", action="store_true",
+                    help="tag CEILING by COUNT of qualifying specs rather "
+                         "than by list position. The positional test delivers "
+                         "5.2%% CEILING against a configured 20%%, which also "
+                         "halves the 5-stack share")
     ap.add_argument("--all-team-five-max-games", type=int, default=None,
                     help="only guarantee per-team 5-stacks at or below this "
                          "many games (default 4). It measured +8.42 on thin "
@@ -1843,6 +1924,7 @@ def main():
 
     hit_pool = build_hitter_pool(dk, lu, hcache, opp_map, vegas)
     print(f"\nHitter pool: {len(hit_pool)} confirmed batters")
+    report_missing_teams(dk, hit_pool, vegas)
 
     n_gpp = args.lineups - args.cash
     if n_gpp < 0:
@@ -1854,6 +1936,7 @@ def main():
     # Guarantee every team one 5-stack, best offences first so that a slate
     # with fewer entries than teams still covers the likeliest ones.
     _allteams = None
+    _tierbycount = bool(_cfg0.get("tier_by_count") or args.tier_by_count)
     _perteam = (_cfg0.get("all_team_five_per", 1) if args.all_team_five_per
                 is None else args.all_team_five_per)
     # Guarantee every team a 5-stack ONLY on a thin card. Measured 09/07,
@@ -1893,7 +1976,18 @@ def main():
         print("max-correlation: stack sizes %s" % (sizes,))
     if len(sizes) != 3:
         sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
-    specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams, per_team=_perteam)
+    specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams, per_team=_perteam,
+                       tier_by_count=_tierbycount)
+    # The DELIVERED tier mix can drift from this, because a spec that cannot
+    # build is dropped and the seed refill pulls a different slice of the
+    # list. Print both so the two are never confused again: CEILING read 5.2%
+    # of the delivered portfolio on 09/08 while configured for 20%.
+    _tc = defaultdict(int)
+    for s in specs:
+        _tc[s["tier"]] += 1
+    print("  specs by tier: " + "  ".join(
+        f"{k} {v} ({100.0 * v / max(len(specs), 1):.0f}%)"
+        for k, v in sorted(_tc.items())))
     fade_reserved = defaultdict(int)
     for spec in specs:
         if spec["stack"] in fades:
@@ -2002,7 +2096,8 @@ def main():
             # to the shortfall or the refill builds a second full portfolio.
             # Rotate the start each pass so successive seeds refill different
             # teams rather than hammering the top of the allocation.
-            full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams, per_team=_perteam)
+            full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams, per_team=_perteam,
+                       tier_by_count=_tierbycount)
             off = (k * short) % max(1, len(full))
             more = (full + full)[off:off + short]
             before = len(b.lineups)

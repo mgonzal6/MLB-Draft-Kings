@@ -870,6 +870,138 @@ to switch off an arm with three live slates and three top-10 finishes onto one
 whose only live slate went 0-for-6. When the measurement cannot separate two
 arms, the live record is the tiebreaker.
 
+## The CEILING / CORE / CONTRARIAN tiers carry NO information
+
+Never measured until 09/07 -- `metric_study` only scores numeric columns, so
+`tier` had never been joined to results. 919 entries matched to a tier across
+52 contests:
+
+    tier          n    meanPts   median   meanPct   top10
+    CASH         71     97.73     99.15    49.6%      0
+    CONTRARIAN  194     85.87     79.80    55.1%      7
+    CORE        616     84.81     84.58    55.7%      5
+    CEILING      38     80.24     79.95    56.9%      0
+
+**CEILING is the WORST tier on every measure** -- lowest mean, lowest median,
+worst percentile, and zero top-10 finishes in 38 entries. The tier that exists
+specifically to produce the winning lineup has never produced one.
+
+Which tier delivered the best lineup in each contest, against its share of
+entries:
+
+    CORE        37 of 49  75.5%   from 67.0% of entries
+    CONTRARIAN   7 of 49  14.3%   from 21.1% of entries
+    CASH         4 of 49   8.2%   from  7.7% of entries
+    CEILING      1 of 49   2.0%   from  4.1% of entries
+
+Every tier produces winners in almost exact proportion to how many entries it
+gets. That is what a label carrying zero information looks like -- lineups win
+at random with respect to tier.
+
+Caveats: CEILING is only 38 entries, so "zero top-10s" is weak alone, though
+it is directionally consistent across all four columns. CASH's high mean is a
+selection artifact -- cash lineups only ever existed on thin slates.
+
+Same conclusion as metric_study from a different angle: nothing we compute
+separates our own lineups, and the tier ladder rearranges the portfolio
+without improving it.
+
+**The actionable consequence: CORE is where 75% of winners come from.**
+`stack554` is (5,5,4) -- it raises CORE to a 5-stack. So it applies the
+stack-size change to the tier that actually matters, which is a better
+argument for it than the winner-profile data. Conversely, anything that only
+touches CEILING (which is what `sizes=(5,4,3)` does with 5-stacks) is acting
+on 4% of the portfolio and 2% of the winners.
+
+## How much do 5-stacks actually win? 61 contests, 149,336 field lineups
+
+Measured 09/07 because "winners run 5-stacks" was being quoted from single
+contests. Across every standings export on disk with >=200 parsed lineups:
+
+    mean top-10 5-stack share    64.3%
+    mean FIELD  5-stack share    50.3%
+    our 09/08 build              18.2%
+
+So the winner/field gap is 14 points, not the 70-vs-nothing the earlier
+per-slate numbers implied -- HALF THE FIELD already 5-stacks. Quoting "70% of
+winners 5-stack" without the field baseline overstates the edge.
+
+The clean evidence is P(top 10) across all 149k lineups, which is monotonic
+and on a large sample:
+
+    1-stack  n= 2,512   0.279%
+    2-stack  n=18,326   0.207%
+    3-stack  n=20,528   0.322%
+    4-stack  n=29,759   0.366%
+    5-stack  n=78,153   0.502%
+
+A 5-stack hits the top 10 at 1.37x the rate of a 4-stack.
+
+**The number that matters is not 64.3%, it is 18.2%.** Our default build is
+far below the FIELD, never mind the winners -- `sizes = (5, 4, 3)` maps
+5-stacks to the CEILING tier only, and CEILING is ~20% of the portfolio, so
+the 5-stack share is structurally pinned near 20% on every deep slate. That is
+configuration, not a slate property.
+
+**Per-contest variance is enormous:** top-10 5-stack share runs from 10% to
+100% across the 61 contests, and several recent ones are low (194946071 10%,
+194932491 20%, 09/07 evening 40-50%). It is a tendency across many contests,
+not a rule for any one slate.
+
+**And our own replay still says forcing it changes nothing.** `stack554`
+raises the share to ~85% and measures +0.18 (t 0.08) against the shipped arm
+over 14 dates. The likeliest reconciliation is the one this file keeps
+reaching: the field's 5-stackers CHOOSE the team, and we cannot
+(implied_total, +0.130).
+
+## 09/08 RUN AS `stack554`, a deliberate call against a tied measurement
+
+The user chose it for the 10-game 09/08 card knowing the replay cannot
+separate it from `minspend49cov` (+0.18, t 0.08, 7-7 over 14 dates). The
+argument is the structural one above: at 18.2% we are below the FIELD's 50.3%,
+and the P(top10) curve favours bigger stacks. Recorded as a decision, not a
+measurement, so the result is interpretable either way -- one slate confirms
+nothing in either direction.
+
+Note `stack554` does NOT carry the thin-slate coverage guarantee. On a
+<=4-game card it also collapses (5 distinct lineups vs 7, `best` 11 points
+lower on 09/05 night). Use it on deep cards only.
+
+**But thin-slate winners 5-stack too -- that collapse is a constructability
+failure, not evidence against the shape.** Measured over 58 contests split by
+depth:
+
+    depth        contests   top10 5stk   field 5stk    gap
+    <=4 games         9        58.2%       42.4%     +15.8
+    5-7 games        22        62.1%       51.2%     +10.9
+    8+ games         27        70.9%       54.3%     +16.6
+
+The winner-over-field edge is LARGEST on thin cards. So the right reading is
+that we cannot build 5-stacks on a short slate without running the pool dry,
+not that we should not want them there. `minspend49cov`'s thin-slate guarantee
+already produces them -- 09/07 gave ATH four 5-stacks and 27 of 33 lineups
+were 5-stacks -- so the shipped arm is closer to the winner profile on THIN
+cards than on deep ones, which is the opposite of what was assumed.
+
+The deep-slate gap is the real shortfall: winners 70.9%, `minspend49cov`
+18.2%.
+
+**Spreading arms across contests is already supported.**
+`make_entries.py --arms A,B` loads both portfolios and deals them ROUND-ROBIN
+across contests, so every contest gets a mix rather than one arm per contest.
+If one arm suits the slate it has entries everywhere. (The round-robin exists
+because on 08/30 all twelve contrarian lineups landed in one contest, which
+finished 38.5 off its bar.)
+
+**A winner-take-all changes the objective and we cannot exploit it.** Needing
+1st rather than top-10 argues for maximum variance in that specific contest,
+but we have no way to identify our own high-ceiling lineups: within-slate,
+`ceiling` correlates -0.11 with realised score, `proj_points` -0.15,
+`max_stack` -0.07. Targeting "our best lineups" at a WTA is not actionable.
+What does work is what the user already did -- pick a small field. Contest
+selection dominates: on 09/07 the same 143.85 lineup was 132nd in a
+4,756-entry field and 6th in a 237-entry one.
+
 ## SHIPPED 09/07: `minspend49cov` — per-team 5-stack guarantee on thin cards
 
 The user's design, and the first change all week that improves the shipped arm
@@ -921,6 +1053,102 @@ fade converts "less likely to score" into "cannot appear", on a signal
 **Knobs:** `--all-team-five`, `--all-team-five-per N` (guarantees per team,
 round-robin), `--all-team-five-max-games N` (default 4), `--fade-sp-bs N`
 (default 55, never swept).
+
+## 09/08: WE DROPPED THE BEST OFFENCE ON THE SLATE AND NOTHING SAID SO
+
+The worst silent failure recorded here, and the cheapest to have avoided.
+
+The 15:43 lineups feed had 18 of 20 teams posted. The build ran on it, and
+**TOR and TEX appeared in ZERO of the 77 entered lineups** -- not as a fade,
+not as an allocation decision, but because `confirmed_mask` drops every
+unconfirmed bat and neither team's lineup had posted.
+
+TOR was the single best hitting spot on the card:
+
+    TOR implied total   5.50   -- HIGHEST of the 20 teams
+    TOR game total      9.5    -- joint highest
+    opposing starter    Jack Perkins, adj_bs -7.21 -- WEAKEST arm on the slate
+
+Highest implied offence against the weakest arm, and we had no way to reach
+it from any of 77 draws.
+
+**The warning that existed was worse than useless.** preflight printed:
+
+    NOTE: only 18 of 20 SPs confirmed -- the later games have not posted.
+
+That reads as "two missing ARMS". What it actually meant was "two missing
+OFFENCES" -- a 10% cut to the slate. Same words, completely different cost,
+and nothing in the pipeline distinguished them.
+
+**Waiting was free.** Both games were the 9:40 PM ET window; the feed was
+pulled at 15:43 ET-3, so there were **5.9 hours** of slack. Nothing forced
+the early build. The alternative was equally cheap: `--allow-unconfirmed`
+plus a late swap once the lineups posted.
+
+This is the THIRD structural team exclusion in two days, all with the same
+shape -- a team that cannot appear at all, rather than one rated poorly:
+
+    09/07  ATH  hard SP fade (Cease adj_bs 63.47)   0 of 36 lineups
+    09/08  TOR  lineup unposted at feed pull        0 of 77
+    09/08  TEX  lineup unposted at feed pull        0 of 77
+
+The fade at least acts on a number (implied_total, +0.130 -- barely better
+than chance). Confirmation status acts on a file's timestamp.
+
+**Two gates built 09/08, both diagnostic, neither touching construction.**
+
+`preflight.check_team_coverage()` -- diffs slate teams against teams with any
+confirmed player, and now **STOPS the run (exit 1)** naming each missing
+team, its start time, and how many hours away it is. `DK_ALLOW_UNCONFIRMED=1`
+downgrades it to a note, matching the existing override pattern. Run against
+tonight's feed it correctly names TEX and TOR.
+
+`build_portfolio.report_missing_teams()` -- the harness and any direct
+builder call skip preflight entirely, so the same warning is repeated where
+the pool actually exists, annotated with implied total and slate rank:
+
+    !! 2 of 20 slate teams contributed NO hitters to the pool:
+    !!   TEX  implied 3.25  (#16 of 20 on the slate)
+    !!   TOR  implied 5.50  (#1 of 20 on the slate)
+
+**Verified as output-neutral**, per the rule the spec-order regression cost:
+rebuilt the 09/08 snapshot at the same seed and variant, and both
+`DK_upload_09_08_2026_stack554.csv` and the portfolio summary came back
+BYTE-IDENTICAL. It is a gate, not an arm -- there is nothing to measure
+because it changes no lineup. That is the point.
+
+**The operational rule: read the TEAM count, not the SP count.** preflight
+prints `teams with anything confirmed: N`. If N is below the slate team
+count, a whole offence is gone, and the SP line will understate it.
+
+## Small contests get the HEAD of the portfolio, not a sample of it
+
+Found 09/08 when the user noticed one arm looked heavy in one contest.
+`make_entries` deals round-robin across contests, which fixes the tier mix
+(08/30's twelve contrarian lineups all landing in one contest) but NOT
+exposure. A contest smaller than the portfolio exhausts early, so it only
+ever sees the first N rows:
+
+    contest      n   distinct   Misiorowski   portfolio rows drawn from
+    195250979    7      7/7      4/7  57%      1-30
+    195250985   10     10/10     5/10 50%      1-35
+    195251085   20     20/20     0            3-71
+    195251086   20     20/20     0            2-76
+    195251087   20     20/20     0            3-77
+
+Portfolio-wide Misiorowski was 19/77 = 25%, inside the 40% cap. The cap is a
+PORTFOLIO fraction and nothing enforces it per contest. Because the portfolio
+is ordered CEILING -> CORE -> CONTRARIAN and the anchor SP concentrates in
+the head, the two small contests got double the intended exposure and never
+saw the contrarian tail at all.
+
+Not fixed -- flagged during the 09/08 build with minutes to lock and the user
+chose to enter as-is. The fix is to stratify the small-contest slice across
+the whole portfolio rather than take a prefix. Relevant because contest
+selection dominates placement (on 09/07 the same 143.85 lineup was 132nd in a
+4,756-entry field and 6th in a 237-entry one), so the SMALL contests are the
+winnable ones and they are exactly the ones getting the least diversified
+slice.
 
 ## I BROKE THE SHIPPED ARM WITH AN UNMEASURED "FIX". Do not touch spec order.
 
