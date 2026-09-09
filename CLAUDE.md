@@ -1258,25 +1258,41 @@ load-bearing; its exact height is not. So lowering it to make room for a
 
 Both arms kept as `covnofloor` / `minspend485cov`, default off.
 
-## The harness silently fails to build 09_06 and 09_08
+## Pre-lineup snapshots are not build failures. Fixed 09/09.
 
-Flagged 09/09, NOT diagnosed. Across three sweeps (~1,600 builds) every arm
-fails every seed on exactly two snapshots:
+Every sweep on 09/08-09/09 reported the same block of failures:
 
     09_06_2026:  9 games, 180 DK players
     09_08_2026: 10 games, 200 DK players
 
-40 failures total. Both are DEEP slates, and 09_08 is the card that motivated
-all of the 09/08-09/09 work -- so the slate the coverage and floor questions
-came FROM contributed nothing to measuring either. `09_08_2026` builds 77
-lineups fine in production, so this is a harness-side failure, not a slate
-property.
+one per arm per seed, 60 across four sweeps. Diagnosed 09/09: **the two
+directories are `09_06_2026_prev2211` and `09_08_2026_prev2345`, which have
+ZERO confirmed SPs.** A build archives its inputs on every run, so an
+early-afternoon build leaves behind a snapshot taken before lineups posted.
+build_portfolio then correctly refuses it -- "N SPs listed but NONE
+confirmed=Y" -- and the harness retried it once per arm per seed.
 
-It hits all arms equally, so no comparison above is invalidated -- but it is
-the same silent set-shrinkage the parallelism entry warns about, arriving a
-third time. The deep 8+ cell is the noisiest one in every depth split and it
-is missing two of its members. Read the build-failure count before the
-results table, every time.
+**I misread the impact twice, and the reason is worth recording.** The
+failure text is the builder's own header line, which names the SLATE DATE,
+while two directories can share one date. `09_08_2026` and
+`09_08_2026_prev2345` are different snapshots; the base one built fine in
+every sweep and appears in every result table. So the claim that "the deep
+cell is missing two of its ten members" and that "the slate the whole
+investigation came from contributed nothing" was WRONG -- no date was ever
+lost and no conclusion was affected. When a diagnostic names a slate, check
+whether it names the DIRECTORY or the date parsed out of its contents.
+
+The real cost was 20-30 wasted builds a sweep and a failure count that read
+like a defect in the arms.
+
+The harness now skips these up front and says which DIRECTORY and why:
+
+    skipping 09_06_2026_prev2211: 0 of 18 SPs confirmed
+      -- snapshot predates posted lineups, cannot build
+
+Verified: 25 slates, 0 build failures. Note this is the same underlying
+condition the preflight gate stops in production -- a slate whose lineups
+have not posted -- arriving in the replay set as an artifact of archiving.
 
 ## Small contests get the HEAD of the portfolio, not a sample of it
 

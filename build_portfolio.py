@@ -324,6 +324,26 @@ VARIANTS = {
     "allteam5nofade": {"score": None, "top": 1, "min_total_salary": 49000,
                        "hard_min_salary": True, "seeds": 8,
                        "all_team_five": True, "fade_sp_bs": 999},
+    # ---- FILL FLOOR BY TIER, 09/09 ---------------------------------------
+    # User's idea: the SP half of a spec reads `tier` (CONTRARIAN takes a
+    # different adj_bs band) but the HITTER half never does -- stack windows
+    # sort by -sum(bs) and fills sort by bs/salary in every lineup, whatever
+    # the tier. So there is no coupling between a high-ceiling arm and the
+    # bats beside it. A flat fill floor was tested twice and lost (3000
+    # -10.03, 3500 -18.54), but flat also strips the CONTRARIAN tier of the
+    # punts it exists for. These arms floor the solid tiers and leave the tail
+    # alone. NOTE fillfloorceil touches only ~5% of the portfolio, because
+    # CEILING under the shipped positional tier test delivers 5.2%.
+    "fillfloor30": {"score": None, "top": 1, "min_total_salary": 49000,
+                    "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+                    "fill_floor": 3000, "fill_floor_exempt": "CONTRARIAN"},
+    "fillfloor35": {"score": None, "top": 1, "min_total_salary": 49000,
+                    "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+                    "fill_floor": 3500, "fill_floor_exempt": "CONTRARIAN"},
+    "fillfloorceil": {"score": None, "top": 1, "min_total_salary": 49000,
+                      "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+                      "fill_floor": 3000,
+                      "fill_floor_exempt": "CORE,CONTRARIAN"},
     # ---- ISOLATE THE SALARY FLOOR, 09/09 ---------------------------------
     # 09/08's three biggest contests were won at 46,700 / 46,700 / 44,700 --
     # ALL BELOW the 49,000 hard floor, so minspend49 could not have built any
@@ -1152,6 +1172,12 @@ class Builder:
         # None keeps the historical behaviour; set by a variant or --sp-cap.
         self.sp_salary_cap = None
         self.hitter_min_salary = None
+        # Per-TIER fill floor. The global hitter_min_salary applies to every
+        # lineup; this one applies only to tiers NOT in fill_floor_exempt, so
+        # the contrarian tail can keep punting while the rest of the
+        # portfolio gets a floor under its weakest bat.
+        self.fill_floor = 0
+        self.fill_floor_exempt = frozenset()
         self.hitter_min_own = None
         self.min_total_salary = None
         # When set, the min-spend ladder does NOT bend. The ladder exists so a
@@ -1518,6 +1544,16 @@ class Builder:
         # cannot be cherry-picked without breaking the correlation it exists
         # for.
         floor = self.hitter_min_salary or 0
+        # Tier-conditional floor. Every decomposition of a losing slate says
+        # worst4 separates and top3 does not -- 09/08 top-10 lineups ran
+        # worst4 23.20 and 0.36 zeros against our 7.46 and 2.03. The fill sort
+        # is bs/salary with the denominator clamped at 2000, which
+        # MANUFACTURES punts by construction. A flat floor was tried twice and
+        # lost (-10.03 at 3000, -18.54 at 3500), but flat means it also
+        # removed the contrarian tail's reason to exist. This floors the tiers
+        # that are supposed to be solid and leaves CONTRARIAN alone.
+        if self.fill_floor and spec.get("tier") not in self.fill_floor_exempt:
+            floor = max(floor, self.fill_floor)
         for slot in open_slots:
             rem = sum(1 for s in HITTER_SLOTS if s not in placed) - 1
             # reserve the floor, not 2000, or the last slots price themselves
@@ -1847,6 +1883,14 @@ def main():
                          "under this many consecutive seeds and merge the "
                          "distinct lineups. Dedup and every exposure cap "
                          "carry across the merge")
+    ap.add_argument("--fill-floor", type=int, default=None,
+                    help="minimum salary for FILL hitters, applied per tier. "
+                         "Unlike --hitter-min-salary this exempts the tiers "
+                         "named by --fill-floor-exempt (default CONTRARIAN), "
+                         "so the contrarian tail keeps its punts")
+    ap.add_argument("--fill-floor-exempt", default=None,
+                    help="comma-separated tiers exempt from --fill-floor "
+                         "(default CONTRARIAN; pass an empty string for none)")
     ap.add_argument("--tier-by-count", action="store_true",
                     help="tag CEILING by COUNT of qualifying specs rather "
                          "than by list position. The positional test delivers "
@@ -2110,6 +2154,15 @@ def main():
     hfloor = (cfg.get("hitter_min_salary") if args.hitter_min_salary is None
               else (args.hitter_min_salary or None))
     b.hitter_min_salary = hfloor
+    b.fill_floor = int(cfg.get("fill_floor", 0) if args.fill_floor is None
+                       else args.fill_floor)
+    _ex = (args.fill_floor_exempt if args.fill_floor_exempt is not None
+           else cfg.get("fill_floor_exempt", "CONTRARIAN"))
+    b.fill_floor_exempt = frozenset(
+        t.strip().upper() for t in str(_ex).split(",") if t.strip())
+    if b.fill_floor:
+        print(f"fill floor {b.fill_floor} on every tier except "
+              f"{sorted(b.fill_floor_exempt) or 'none'}")
     mspend = (cfg.get("min_total_salary") if args.min_total_salary is None
               else (args.min_total_salary or None))
     b.min_total_salary = mspend

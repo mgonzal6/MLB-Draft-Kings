@@ -295,10 +295,33 @@ def main():
         except Exception:
             continue
 
-    pairs = []
+    pairs, prelineup = [], []
     for snap in sorted(glob.glob(os.path.join(SNAPSHOT_DIR, "*"))):
         if not all(os.path.exists(os.path.join(snap, f)) for f in NEEDED):
             continue
+        # Skip snapshots taken BEFORE lineups posted. A build archives its
+        # inputs every run, so an early-afternoon build leaves a snapshot with
+        # zero confirmed SPs; build_portfolio then correctly refuses it
+        # ("N SPs listed but NONE confirmed=Y"). Attempting it anyway burned
+        # one build per arm per seed and reported each as "build failed",
+        # which reads like a defect in the arm. It cost 20-30 wasted builds a
+        # sweep and, worse, the failure text names the SLATE DATE while two
+        # directories can share one -- 09_08_2026 and 09_08_2026_prev2345 --
+        # so it looked as though a date had dropped out of the set when the
+        # base snapshot was building fine all along. Say which DIRECTORY was
+        # skipped and why, once, before the results table.
+        try:
+            _lu = pd.read_csv(os.path.join(snap, "Filtered_Lineups.csv"))
+            _lu.columns = _lu.columns.str.strip()
+            _sp = _lu[_lu["batting order"].astype(str).str.strip().str.upper()
+                      == "SP"]
+            _ok = int((_sp["confirmed"].astype(str).str.strip().str.upper()
+                       == "Y").sum())
+            if len(_sp) and not _ok:
+                prelineup.append((os.path.basename(snap), len(_sp)))
+                continue
+        except Exception:
+            pass
         names = set(pd.read_csv(os.path.join(snap, "Filtered_DKSalaries.csv"))["Name"])
         best, cov = None, 0.0
         for p, (fpts, _, _) in contests.items():
@@ -312,6 +335,10 @@ def main():
                 best, cov = p, j
         if best and cov >= 0.50:
             pairs.append((snap, best, cov))
+
+    for _n, _t in prelineup:
+        print(f"  skipping {_n}: 0 of {_t} SPs confirmed "
+              f"-- snapshot predates posted lineups, cannot build")
 
     if not pairs:
         raise SystemExit("no snapshot could be matched to a contest")
