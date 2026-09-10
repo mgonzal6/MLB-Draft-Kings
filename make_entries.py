@@ -170,6 +170,14 @@ def main():
             if k < len(by_contest[cid]):
                 slots.append(by_contest[cid][k])
 
+    # Which contest each fillable row belongs to, so a duplicate can be
+    # steered AWAY from a contest that already holds that lineup.
+    slot_cid = {}
+    for cid, idxs in by_contest.items():
+        for i in idxs:
+            slot_cid[i] = cid
+    held = {cid: set() for cid in by_contest}   # cid -> {(arm, pool index)}
+
     used = {k: 0 for k in pool}
     dupes = 0
     assigned = {}
@@ -178,6 +186,7 @@ def main():
         for arm in order[k % len(order):] + order[:k % len(order)]:
             if used[arm] < len(pool[arm]):
                 assigned[i] = (arm, pool[arm][used[arm]])
+                held[slot_cid[i]].add((arm, used[arm]))
                 used[arm] += 1
                 placed = True
                 break
@@ -188,8 +197,43 @@ def main():
         # but it buys no extra coverage: the same lineup cannot reach the
         # top ten twice by being entered twice. Only worth it when the
         # lineups are +EV on their own.
-        arm = order[dupes % len(order)]
-        assigned[i] = (arm, pool[arm][dupes // len(order) % len(pool[arm])])
+        # A duplicate in a DIFFERENT contest is a genuinely independent shot
+        # at a different 10th-place bar. Two copies in the SAME contest are
+        # one outcome counted twice -- they rise and fall together, so the
+        # second buys nothing at all.
+        #
+        # The old round-robin walked the pool by duplicate index alone and
+        # ignored which contest the row belonged to. On 09/09 that put both
+        # copies of 6 of 18 duplicated lineups into the same contest.
+        #
+        # Contest choice is worth far more than which lineup goes where:
+        # measured over 16 slates with 2+ contests, the LARGER field had the
+        # higher 10th-place bar on 15 of them, mean +14.75 points, against
+        # the best construction arm's +5.1. So spending a duplicate on a
+        # second field is the whole point of having one.
+        cid = slot_cid[i]
+        pick = None
+        start = dupes % len(order)
+        for off in range(len(order)):
+            arm = order[(start + off) % len(order)]
+            n = len(pool[arm])
+            if not n:
+                continue
+            base = dupes // len(order)
+            for j in range(n):
+                cand = (base + j) % n
+                if (arm, cand) not in held[cid]:
+                    pick = (arm, cand)
+                    break
+            if pick:
+                break
+        if pick is None:
+            # every lineup is already in this contest -- unavoidable once the
+            # entry count exceeds the distinct count per contest
+            arm = order[dupes % len(order)]
+            pick = (arm, dupes // len(order) % len(pool[arm]))
+        assigned[i] = (pick[0], pool[pick[0]][pick[1]])
+        held[cid].add(pick)
         dupes += 1
 
     out, filled = [hdr], 0

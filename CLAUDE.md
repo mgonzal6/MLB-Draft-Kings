@@ -1572,6 +1572,71 @@ directory before comparing anything. Two snapshots per date is NORMAL: the
 builder archives its inputs on every run, so any day with two builds has a
 `_prevHHMM` twin.
 
+## CONTEST SELECTION IS THE BIGGEST MEASURED EFFECT IN THIS FILE
+
+Measured 09/10 across 65 standings exports, grouped into 23 slates by
+player-pool overlap so the comparison is WITHIN a slate -- same players, same
+night, different fields. `contest_study.py`.
+
+    slate   contests  smallest n  its bar   largest n  its bar    gap
+    72048          4         237   135.00        4756   168.85  +33.85
+    28005          5        1189   179.00        5251   212.45  +33.45
+    50985          5         237   125.05        1650   149.85  +24.80
+    70063          3         237   110.50        1189   133.65  +23.15
+    16721          2        1189   176.80        5839   198.70  +21.90
+    82398          2         475   136.75        3567   157.45  +20.70
+    46071          4        1169   147.50        7134   168.35  +20.85
+    92516          7         890   143.20        7134   163.00  +19.80
+    ...
+    mean bar gap +14.75, and the BIGGER field had the higher bar on 15 of 16
+
+By field size across all 65:
+
+    field       contests   mean bar   mean winning score
+    <300               4     116.44     145.84
+    300-1k             8     151.47     177.19
+    1k-2.5k           32     152.91     175.10
+    2.5k+             21     170.14     193.40
+
+**A sub-300 field's 10th-place bar is ~54 points below a 2.5k+ field's**, and
+quadrupling the field costs about 15. Fifteen of sixteen slates, one tie.
+
+For scale, the best CONSTRUCTION result in three weeks is minspend49cov at
++5.1 dBest (t 2.97) over control. **Contest selection is worth roughly three
+times more, and more consistently.** Every near-miss in this file is really a
+contest-selection story:
+
+    08/30  rank 11 by 0.50; top-10 in either of the other two contests
+    09/04  the only top-10 needed the softest bar; 148.45 missed in six others
+    09/07  the same 143.85 lineup was 132nd in a 4,756 field and 6th in a 237
+    09/09  132.55 was rank 11 vs a 133.65 bar, while a 237-entry contest on
+           the same slate had a bar of 110.50
+
+This is the one lever that has never been worked on, and it is bigger than
+everything that has.
+
+**Caveat before over-reading it.** Small fields pay less, and this measures
+the BAR, not the money -- the file deliberately does not track dollars
+because ROI measures the contest rather than the build. What it establishes
+is where a portfolio of our observed strength (best lineup ~130-150) can
+actually finish top ten. It cannot say whether the payout justifies it.
+Four sub-300 contests is also a thin cell.
+
+## Duplicates must go to DIFFERENT contests. Fixed 09/10.
+
+A duplicate in another contest is an independent shot at a different bar. Two
+copies in the SAME contest rise and fall together -- one outcome counted
+twice, and the second entry buys nothing.
+
+`make_entries` dealt duplicates by round-robin on the duplicate index alone,
+ignoring which contest the row belonged to. On 09/09, **6 of 18 duplicated
+lineups had both copies in the same contest.** It now tracks what each
+contest already holds and picks a lineup that contest is missing, falling
+back only when the entry count for a contest exceeds the distinct supply.
+
+Re-dealt 09/09: 0 of 18 share a contest, and the two lineups entered three
+times land one per contest.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
