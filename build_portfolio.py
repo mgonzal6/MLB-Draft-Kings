@@ -324,6 +324,17 @@ VARIANTS = {
     "allteam5nofade": {"score": None, "top": 1, "min_total_salary": 49000,
                        "hard_min_salary": True, "seeds": 8,
                        "all_team_five": True, "fade_sp_bs": 999},
+    # ---- per-team 5 AND 4 stack ladder, 09/09 -----------------------------
+    # User's design. The guarantee only ever emitted ONE spec per team, always
+    # size 5, so a team's only 4-stack could come from the normal allocation
+    # -- which is BLOCK ordered, so on a slate that underfills only the first
+    # team's block is ever attempted. 09/09 (4 games) delivered 15 of 90 with
+    # a FLAT allocation (SD 12, WSH 12, STL 12, TOR 12, ATH 11, SEA 11) and SD
+    # took 14 of the stacks purely for sorting first. A ladder asks for each
+    # team's 4-stack explicitly instead of hoping the walk reaches it.
+    "team54": {"score": None, "top": 1, "min_total_salary": 49000,
+               "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+               "all_team_sizes": "5,4"},
     # ---- FILL FLOOR BY TIER, 09/09 ---------------------------------------
     # User's idea: the SP half of a spec reads `tier` (CONTRARIAN takes a
     # different adj_bs band) but the HITTER half never does -- stack windows
@@ -1032,7 +1043,7 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
 
 
 def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
-                tier_by_count=False, guar_size=5):
+                tier_by_count=False, guar_size=5, guar_sizes=None):
     """Tier assignment: ~20% ceiling, ~20% contrarian, rest core.
 
     `sizes` is (ceiling, core, contrarian) stack sizes.
@@ -1074,10 +1085,25 @@ def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
             if t not in seen:
                 seen.add(t)
                 uniq.append(t)
-        for k in range(per_team):
+        # `guar_sizes` is a LADDER: one pass per size, every team served in
+        # each pass. (5, 4) gives every team a 5-stack first and then every
+        # team a 4-stack, so an underfilling slate still covers all teams at
+        # the bigger size before any team gets a second look.
+        #
+        # Tier follows SIZE, matching sizes=(ceiling, core, contrarian): a
+        # 5-stack is CEILING, a 4-stack is CORE. That matters -- CORE is where
+        # 75% of historical winners came from, and before this the guarantee
+        # emitted CEILING only, so every non-primary team's coverage sat in
+        # the tier that has produced the fewest.
+        _ladder = ([int(guar_size)] * max(1, per_team) if not guar_sizes
+                   else [int(z) for z in guar_sizes])
+        _tier_for = {sizes[0]: "CEILING", sizes[1]: "CORE",
+                     sizes[2]: "CONTRARIAN"}
+        for sz in _ladder:
             for t in uniq:
-                guaranteed.append({"stack": t, "tier": "CEILING",
-                                   "size": int(guar_size)})
+                guaranteed.append({"stack": t,
+                                   "tier": _tier_for.get(sz, "CORE"),
+                                   "size": int(sz)})
         guaranteed = guaranteed[:max(0, n_lineups)]
         n_lineups = max(0, n_lineups - len(guaranteed))
         if n_lineups == 0:
@@ -1913,6 +1939,11 @@ def main():
     ap.add_argument("--cover-min-per", type=int, default=None,
                     help="how many guaranteed coverage stacks each team gets "
                          "on a deep slate (default 1), emitted round-robin")
+    ap.add_argument("--all-team-sizes", default=None,
+                    help="comma-separated ladder of guaranteed stack sizes per "
+                         "team, e.g. 5,4 -- every team gets a 5-stack, then "
+                         "every team gets a 4-stack. Tier follows size "
+                         "(5=CEILING, 4=CORE). Overrides --all-team-five-per")
     ap.add_argument("--all-team-five", action="store_true",
                     help="guarantee EVERY team on the slate one 5-stack "
                          "before the normal allocation, overriding the fade. "
@@ -2067,6 +2098,7 @@ def main():
                        if args.all_team_five_max_games is None
                        else args.all_team_five_max_games)
     _guar_size = 5
+    _guar_ladder = None
     _deepcover = False
     _covmin = int(_cfg0.get("cover_min_size", 0) if args.cover_min_size is None
                   else args.cover_min_size)
@@ -2076,6 +2108,12 @@ def main():
                          key=lambda t: -(vegas.loc[t, "implied_total"]
                                          if t in vegas.index else 0.0))
         _allteams = _byimpl
+        _gl = (args.all_team_sizes if args.all_team_sizes is not None
+               else _cfg0.get("all_team_sizes"))
+        if _gl:
+            _guar_ladder = [int(x) for x in str(_gl).split(",") if x.strip()]
+            print(f"per-team guaranteed stack ladder: {_guar_ladder} "
+                  f"x {len(_byimpl)} teams")
     elif _covmin > 0 and n_games > _guar_max_games:
         # DEEP-slate coverage floor. The 5-stack guarantee loses here (-2.81
         # on 8+ games) because it spends one whole lineup per team on the
@@ -2120,7 +2158,8 @@ def main():
     if len(sizes) != 3:
         sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
     specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams, per_team=_perteam,
-                       tier_by_count=_tierbycount, guar_size=_guar_size)
+                       tier_by_count=_tierbycount, guar_size=_guar_size,
+                       guar_sizes=_guar_ladder)
     # The DELIVERED tier mix can drift from this, because a spec that cannot
     # build is dropped and the seed refill pulls a different slice of the
     # list. Print both so the two are never confused again: CEILING read 5.2%
@@ -2249,7 +2288,7 @@ def main():
             # Rotate the start each pass so successive seeds refill different
             # teams rather than hammering the top of the allocation.
             full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams, per_team=_perteam,
-                              guar_size=_guar_size,
+                              guar_size=_guar_size, guar_sizes=_guar_ladder,
                        tier_by_count=_tierbycount)
             off = (k * short) % max(1, len(full))
             more = (full + full)[off:off + short]

@@ -1294,6 +1294,77 @@ Verified: 25 slates, 0 build failures. Note this is the same underlying
 condition the preflight gate stops in production -- a slate whose lineups
 have not posted -- arriving in the replay set as an artifact of archiving.
 
+## Block order concentrates on the best offence BY ACCIDENT, and fixing it loses
+
+09/09, a 4-game card. The user asked why SD held nine of fifteen stacks and
+every other team held one. The answer was not analytical, and they were right
+to say so:
+
+    Primary-stack allocation (72 GPP lineups):
+      SD: 12 (implied 5.00)    ATH: 11 (implied 4.00)
+      WSH: 12 (implied 3.50)   SEA: 11 (implied 4.75)
+      STL: 12 (implied 4.75)   TEX:  1 (implied 3.25, faded)
+      TOR: 12 (implied 5.50)   SF:   1 (implied 3.25, faded)
+
+**The allocation is FLAT.** Six teams within one lineup of each other. The
+portfolio came out 14-to-1 because `make_specs` emits in BLOCK order, SD's
+block sorts first, and the builder exhausted at 15 of 90 without reaching
+WSH's block. A flat allocation became a concentrated portfolio through list
+position.
+
+**This is an UNDERFILL pathology, not a general one.** A deep slate fills
+60-77 lineups and reaches every block, so order barely matters. Thin slates
+underfill by construction, so they get it worst -- and thin slates are where
+this project's best live results have come from.
+
+**The fix produced exactly the intended distribution and measured WORSE.**
+`--all-team-sizes 5,4` makes the per-team guarantee a LADDER: every team gets
+a 5-stack, then every team gets a 4-stack, tier following size so the
+4-stacks land in CORE rather than CEILING. Before, the guarantee emitted one
+spec per team, always size 5, always CEILING -- which is why no team but the
+block leader ever got a 4-stack. They were never requested, not rejected.
+
+On 09/09 it did what it says: SD 9 -> 5 of 15, and five teams held both a
+5-stack and a 4-stack. 25 slates x 5 seeds:
+
+    depth        dates   dBest    SE      t    better/worse
+    thin <=4        3    -5.62   3.74   -1.50      0 / 2
+    mid 5-7         6    +0.00   0.00   +0.00      0 / 0
+    deep 8+         8    +0.00   0.00   +0.00      0 / 0
+
+    thin pooled, 20 pairs: -7.39  t -2.37
+
+The slate-size condition is clean -- mid and deep are 0.00 with SE 0.00 on
+every pair. On the only cell it touches it costs 5.6 points and wins no date.
+
+**Why: at fixed portfolio size, a second stack for WSH is a stack NOT given
+to SD.** The allocator's flat count says the teams are comparable as stack
+CANDIDATES, but the lineups still have to buy the actual bats, and the
+lower-implied team's are worse. Same trade that killed cover2/3/4/5, reached
+from the opposite direction -- and the argument that this one was different
+because it REDISTRIBUTES at fixed size rather than ADDING a coverage tax did
+not save it. Redistribution at fixed size is still a transfer from the best
+offence to worse ones.
+
+**So the arbitrary rule was accidentally doing something defensible.** Block
+order is not a reason, but it concentrates on whichever team the allocator
+sorted first, and concentration on the best offence is what produces the
+ceiling. The defect is real and it is not costing points, so it is not the
+lever.
+
+**The narrower fix is still untested and is the one worth trying.** ONE LIST
+IS DOING TWO JOBS: `make_specs` uses spec position both to assign tiers
+(CEILING to the first n_ceil, CONTRARIAN to the last n_cont) and to set the
+order in which the builder attempts them. The 09/07 round-robin regression
+(-6.7 on the shipped arm) came from breaking the first to fix the second.
+Assign tiers on the block-ordered list exactly as now, THEN reorder only the
+attempt sequence with each spec carrying its assigned tier. That fixes the
+arbitrariness without transferring lineups between teams -- SD keeps its
+count, only the order of attempts changes when the build exhausts. Untested
+as of 09/09.
+
+Kept behind `--all-team-sizes`, default off (`team54`). NOT shipped.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
