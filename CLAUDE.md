@@ -1678,6 +1678,59 @@ portfolio is untouched and the extras are lineups those arms would have built
 anyway. That is the same argument that justified the 09/07 cross-arm fill,
 and it is weaker than a shipping decision on purpose.
 
+### AMENDED the same day: the marginal lineup is much worse than the first
+
+The "82% more draws" headline above is the COUNT. Replayed on 09/09 against
+the real standings it bought nothing, and that is the honest half of this.
+
+    arm merge on 09_09_2026 (4 games, confirmed feed)
+      base minspend49cov  15   + ilvthin 4  + secthin 6  + covnofloor 9 = 34
+      what was actually entered                                        = 25
+
+                          entered(25)   4-arm(34)
+      best                    132.55      132.55
+      2nd                     127.55      127.55
+      3rd                     124.55      124.55
+      mean                     83.47       77.20
+      clears 110.50 bar             5           6
+      clears 133.65 bar             0           0
+
+    the 9 lineups added but never entered: BEST 116.90, none above 133.65
+
+**36% more draws produced one extra lineup over the soft bar and nothing at
+all against the hard one.** Identical top three; the mean FELL, because the
+marginal lineup is drawn from the bottom of the pool.
+
+The principle survives -- more draws is still the strongest construction
+lever -- but it is not a free win, and it was not the binding constraint on
+09/09. That slate's pool topped out near 132.6 across all five seeds while
+the bar was 133.65. Drawing from a distribution 25 times or 34 times cannot
+help when the distribution does not reach the bar.
+
+**So the two slates disagree and BOTH are real:**
+
+    09/07 (3 games)  33 -> 60 distinct, donors productive
+    09/09 (4 games)  15 -> 34 distinct, donors all worse than what we had
+
+Game count is not what separates them -- 09/09 had MORE games and a far
+smaller pool, because SF and TEX were hard-faded leaving 6 usable teams of 8.
+Expect donor yield and donor QUALITY to vary slate to slate, and do not
+budget for the 09/07 number.
+
+**Donor productivity also contradicted the "differ in one dimension" rule.**
+On 09/09 ilvthin gave 4 and covnofloor gave 9. ilvthin differs only in walk
+order so it re-treads the same salary space and collides with what the base
+already built (9 of its 15 were already held); covnofloor removes the floor
+and builds in genuinely different territory. The corrected rule: **prefer a
+donor that differs in a dimension which changes what is CONSTRUCTIBLE**, not
+merely how the space is walked -- while remembering covnofloor buys that by
+diluting the floor, worth -4.08 dBest on deep slates.
+
+**What would actually have converted 09/09:** the 132.55 entered in the
+237-entry contest (bar 110.50) rather than the 1,189-entry one (bar 133.65).
+Five of the entered lineups already cleared 110.50. Contest selection remains
+the only thing measured this week that turns that slate into a top-10 finish.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
