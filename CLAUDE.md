@@ -1637,6 +1637,47 @@ back only when the entry count for a contest exceeds the distinct supply.
 Re-dealt 09/09: 0 of 18 share a contest, and the two lineups entered three
 times land one per contest.
 
+## THREE arms nearly DOUBLE the distinct lineups on a thin card
+
+Measured 09/10 on the 09/07 3-game snapshot, `--lineups 90` each, merged with
+`merge_arms.py`:
+
+    base  minspend49cov                33 distinct
+      +   ilvthin                     +19
+      +   secthin                      +8
+                                    -----
+                                       60 distinct, zero duplicates
+
+**82% more draws**, and concentration IMPROVED rather than degraded -- worst
+bat 64% -> 60%, top SP 36% -> 37%. Donors dilute, because they are different
+lineups drawn from the same pool.
+
+This matters more than any arm in this file. More draws is the strongest
+measured lever anywhere here (20 -> 40 lineups took the top-10 hit rate
+0.062 -> 0.250, roughly twice the best arm's effect), and a thin slate caps a
+single arm well below the entry count -- 09/09 delivered 15 of a 90 request
+no matter what was asked for.
+
+**Donor yield tracks how much the arm shares with the base.** ilvthin gave 19
+and secthin 8. ilvthin differs from the base ONLY in spec attempt order, so
+it reaches lineups the base never tried but builds them the same way.
+secthin changes lineup SHAPE, which has fewer legal constructions on a short
+card -- it logged 161,543 failed secondary-stack attempts, because after
+removing the primary team, the two teams the SPs oppose and any faded team
+there is almost nothing left to pair with. It still found 8 the others
+missed.
+
+So pick donors that differ from the base in ONE dimension, not many. A donor
+that shares the base's measured components (floor, guarantee, fade) and
+changes only how the space is walked is the most productive kind.
+
+**Do not read the arms' own sweep results into this.** ilvthin and secthin
+are NOT shipped -- four thin dates and six mid ones do not clear the bar
+minspend49cov cleared. As DONORS the exposure is much smaller: the base
+portfolio is untouched and the extras are lineups those arms would have built
+anyway. That is the same argument that justified the 09/07 cross-arm fill,
+and it is weaker than a shipping decision on purpose.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
