@@ -1506,6 +1506,72 @@ minspend49cov + covnofloor was used on 09/09 and DILUTES the salary floor --
 that portfolio came out at a 48,042 mean with one lineup at 42,400, against a
 floor worth -4.08 dBest on deep slates and -3.79 on mid when removed.
 
+## On a thin slate, 125 vs 147 is mostly NOISE. A bound, not a lever.
+
+Chased on 09/10 after the 09/09 replay appeared to show a 146.6 portfolio
+against the 132.55 that was entered. Three separate readings of that number
+were wrong before it resolved; the resolution is worth more than the chase.
+
+**What actually existed on 09/09:**
+
+    11:15 build, PROJECTED WSH lineup, as built     best 125.55
+    confirmed build, as ENTERED                     best 132.55
+
+So rebuilding on the confirmed feed GAINED 7 points. The projected build's
+best lineup carried CJ Abrams 0.0 and Zack Gelof 0.0; the confirmed one
+replaced them. The decision to rebuild once lineups post is correct and this
+slate supports it.
+
+**Where 146.55 came from.** The replay does not score the portfolio that was
+built -- it REBUILDS from the snapshot's inputs at its own settings. Rebuilt
+from the same projected inputs at `--lineups 60 --seed 42 --seeds 8` it
+produces 146.55, verified reproducible, a legal portfolio with 2 of 15
+lineups clearing the 133.65 bar. Its best lineup is an SD five-stack plus
+three STL -- the two-team split that won all three contests, arrived at from
+a batting order that was WRONG.
+
+That portfolio never existed. Entering it required keeping lineup data known
+to be a guess AND a request size that does nothing on most slates.
+
+**The finding is the sensitivity itself.** Request size swept on the two
+snapshots of the same slate:
+
+    confirmed inputs   --lineups 40 / 60 / 90   best 132.55 / 132.55 / 132.55
+    projected inputs   as built (43) vs rebuilt (60)    125.55 vs 146.55
+
+Identical to the penny on one input set; a 21-point swing on the other. That
+is not a lever, it is noise sensitivity -- the same shape as the seed
+sensitivity already recorded (09/06: one arm, one snapshot, three seeds,
+131.20 / 151.60 / 161.20).
+
+**So treat 125-147 on a 4-game card as one noise band.** 09/09 finished 1.10
+under a bar sitting in the middle of it. Construction cannot be expected to
+control that gap, and an arm that appears to move `best` by 10 points on a
+single thin slate has told you nothing. This is the quantitative version of
+what the per-date spreads have been saying all along (stack554 vs
+minspend49cov ran -18.02 to +16.26 across 14 dates).
+
+**Do NOT re-derive a request-size lever from this.** Sweeping 40/60/90 on the
+confirmed snapshot returned identical best AND identical top-SP and top-bat
+exposure (60%/60%). The caps hypothesis -- that a bigger request sizes the
+exposure caps to a portfolio that never exists and switches them off -- is
+arithmetically true and made no difference to the outcome.
+
+**Process failure, third occurrence in one session.** All three were the same
+error: reading a number without checking which ARTIFACT produced it.
+
+  * 09_08_2026 "build failed" was 09_08_2026_prev2345, a different directory
+  * the 146.6 came from pooling 09_09_2026 with 09_09_2026_prev1115, because
+    the analysis matched on `slate.startswith('09_09')`
+  * 146.6 was then compared against a portfolio built at different settings
+
+The lesson was recorded after the first one -- check whether a label names
+the DIRECTORY or the date parsed from its contents -- and repeated twice more
+within hours. When a slate label appears in any output, resolve it to a
+directory before comparing anything. Two snapshots per date is NORMAL: the
+builder archives its inputs on every run, so any day with two builds has a
+`_prevHHMM` twin.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
