@@ -324,6 +324,34 @@ VARIANTS = {
     "allteam5nofade": {"score": None, "top": 1, "min_total_salary": 49000,
                        "hard_min_salary": True, "seeds": 8,
                        "all_team_five": True, "fade_sp_bs": 999},
+    # ilv confined to the cards where the build actually underfills. On any
+    # card over 4 games this is byte-identical to minspend49cov, so it is a
+    # strict superset in the same way minspend49cov is of minspend49.
+    "ilvthin": {"score": None, "top": 1, "min_total_salary": 49000,
+                "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+                "interleave_attempts": True, "interleave_max_games": 4},
+    # ---- secondary stack, RETESTED 09/09 ---------------------------------
+    # sec3 pairs every primary with a 3-man run from a second team: CEILING
+    # becomes 5+3 (all eight hitter slots), CORE 4+3, CONTRARIAN 3+3. That is
+    # the exact shape of 09/09's three winning lineups.
+    "sec3": {"score": None, "top": 1, "min_total_salary": 49000,
+             "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+             "secondary_stack": 3},
+    # sec3 confined to the cards where it measured positive. Byte-identical
+    # to minspend49cov above 7 games, so a strict superset there.
+    "secthin": {"score": None, "top": 1, "min_total_salary": 49000,
+                "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+                "secondary_stack": 3, "secondary_max_games": 7},
+    "sec2": {"score": None, "top": 1, "min_total_salary": 49000,
+             "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+             "secondary_stack": 2},
+    # ---- attempt order separated from tier assignment, 09/09 -------------
+    # See the comment in make_specs. Block order does two jobs; this changes
+    # only the second. Team counts identical to minspend49cov, so any
+    # difference is purely WHICH specs survive when the builder exhausts.
+    "ilv": {"score": None, "top": 1, "min_total_salary": 49000,
+            "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+            "interleave_attempts": True},
     # ---- per-team 5 AND 4 stack ladder, 09/09 -----------------------------
     # User's design. The guarantee only ever emitted ONE spec per team, always
     # size 5, so a team's only 4-stack could come from the normal allocation
@@ -1043,7 +1071,8 @@ def allocate_stacks(hit_pool, sp_df, vegas, n_lineups, opp_map,
 
 
 def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
-                tier_by_count=False, guar_size=5, guar_sizes=None):
+                tier_by_count=False, guar_size=5, guar_sizes=None,
+                interleave=False):
     """Tier assignment: ~20% ceiling, ~20% contrarian, rest core.
 
     `sizes` is (ceiling, core, contrarian) stack sizes.
@@ -1144,6 +1173,37 @@ def make_specs(alloc, n_lineups, sizes=(5, 4, 3), all_teams=None, per_team=1,
             tier, size = "CORE", core_sz
         first_seen.add(team)
         specs.append({"stack": team, "tier": tier, "size": size})
+    # ---- attempt order, separately from tier assignment -------------------
+    # ONE LIST WAS DOING TWO JOBS. Spec position decides which teams get the
+    # CEILING and CONTRARIAN tiers (the loop above), AND the order in which
+    # the builder attempts them. Those are different questions and only the
+    # first wants block order.
+    #
+    # When a slate UNDERFILLS, the second job dominates: 09/09 delivered 15 of
+    # 90 from a FLAT allocation (SD 12, WSH 12, STL 12, TOR 12) and SD took 14
+    # of the stacks purely because its block sorted first. The builder never
+    # reached anyone else.
+    #
+    # Interleaving the whole list was tried 09/07 and cost 6.7 points, because
+    # it scattered the tiers -- it broke job one to fix job two. This reorders
+    # AFTER tagging, so every spec keeps the tier it was assigned on the
+    # block-ordered list and only the walk order changes. Team COUNTS are
+    # untouched, so unlike the 5,4 ladder (-5.62 on thin slates) this moves no
+    # lineups between teams.
+    if interleave and specs:
+        byteam = {}
+        order = []
+        for sp in specs:
+            if sp["stack"] not in byteam:
+                byteam[sp["stack"]] = []
+                order.append(sp["stack"])
+            byteam[sp["stack"]].append(sp)
+        woven = []
+        while any(byteam[t] for t in order):
+            for t in order:
+                if byteam[t]:
+                    woven.append(byteam[t].pop(0))
+        specs = woven
     return guaranteed + specs
 
 
@@ -1204,6 +1264,9 @@ class Builder:
         # portfolio gets a floor under its weakest bat.
         self.fill_floor = 0
         self.fill_floor_exempt = frozenset()
+        # Contiguous run of N bats from a SECOND team, placed before the fill
+        # loop. 0 = off (historical behaviour).
+        self.secondary_size = 0
         self.hitter_min_own = None
         self.min_total_salary = None
         # When set, the min-spend ladder does NOT bend. The ladder exists so a
@@ -1545,6 +1608,57 @@ class Builder:
                     if assign_slots(picked + [bb], HITTER_SLOTS):
                         picked.append(bb)
                         break
+
+        # ---- SECONDARY STACK -------------------------------------------
+        # 09/09 (4 games): all three winning lineups were TWO-team splits --
+        # STL 4 + SD 3, STL 4 + SD 3, SD 4 + STL 3 -- while 17 of our 24
+        # lineups were single 5-stacks. Zero of our 24 held SD 3+ AND STL 3+.
+        # We finished 11th, 1.10 off the bar, holding the right primary team
+        # (SD was in 27 of 30 top-10 lineups) and the slate's top scorer
+        # (Merrill 47.0, 9 of 24 lineups).
+        #
+        # A secondary 3-man stack measured -6.39 on 08/30 over NINE slates
+        # against control, and the reasoning recorded then still stands on its
+        # own terms: two 3-man runs need two teams to erupt, one 5-man run
+        # needs one. This retests it because the set is now 25 slates, the
+        # harness scores placement rather than dMean, and the baseline is
+        # minspend49cov rather than control -- and because CLAUDE.md flags it
+        # as one of the three closest calls a larger set could move.
+        #
+        # The second team is ranked by implied total and sampled from the top
+        # few, never the primary team, never a team our SPs oppose, never a
+        # faded team. It is a contiguous batting-order run like the primary,
+        # so it carries the same correlation the fill loop cannot.
+        if (self.secondary_size
+                and len(picked) + self.secondary_size <= len(HITTER_SLOTS)):
+            _used = {p["name"] for p in picked}
+            _cands = [t for t in self.impl.index
+                      if t != stack_t and t not in banned
+                      and t not in self.fades]
+            _cands.sort(key=lambda t: -float(self.impl.get(t, 0)))
+            _cands = _cands[:4]
+            rng.shuffle(_cands)
+            _spent = salary + sum(p["salary"] for p in picked)
+            for _t in _cands:
+                _wins = stack_windows(self.hit_pool, _t, self.secondary_size)
+                _hit = False
+                for _w in _wins[:4]:
+                    if any(x["name"] in _used for x in _w):
+                        continue
+                    _trial = picked + list(_w)
+                    _rem = len(HITTER_SLOTS) - len(_trial)
+                    _cost = _spent + sum(x["salary"] for x in _w)
+                    if _cost + _rem * 2000 > SALARY_CAP:
+                        continue
+                    if assign_slots(_trial, HITTER_SLOTS) is None:
+                        continue
+                    picked = _trial
+                    _hit = True
+                    break
+                if _hit:
+                    break
+            else:
+                self.reject["no legal secondary stack"] += 1
 
         placed = assign_slots(picked, HITTER_SLOTS)
         if placed is None:
@@ -1939,6 +2053,25 @@ def main():
     ap.add_argument("--cover-min-per", type=int, default=None,
                     help="how many guaranteed coverage stacks each team gets "
                          "on a deep slate (default 1), emitted round-robin")
+    ap.add_argument("--secondary-max-games", type=int, default=None,
+                    help="only build a secondary stack at or below this many "
+                         "games (0 = always). It measures +2.70 on thin cards "
+                         "and negative on deep ones")
+    ap.add_argument("--secondary-stack", type=int, default=None,
+                    help="contiguous run of N bats from a SECOND team, placed "
+                         "before the fill loop. 09/09's three winning lineups "
+                         "were all two-team splits (4+3). Measured -6.39 over "
+                         "9 slates on 08/30; retested 09/09")
+    ap.add_argument("--interleave-max-games", type=int, default=None,
+                    help="only interleave attempt order at or below this many "
+                         "games (0 = always). Interleaving matters only when "
+                         "the build underfills, which is a thin-slate "
+                         "condition")
+    ap.add_argument("--interleave-attempts", action="store_true",
+                    help="walk the spec list round-robin by team instead of "
+                         "block by block, WITHOUT changing tier assignment. "
+                         "Matters only when the build underfills and the tail "
+                         "of the list is never attempted")
     ap.add_argument("--all-team-sizes", default=None,
                     help="comma-separated ladder of guaranteed stack sizes per "
                          "team, e.g. 5,4 -- every team gets a 5-stack, then "
@@ -2099,6 +2232,23 @@ def main():
                        else args.all_team_five_max_games)
     _guar_size = 5
     _guar_ladder = None
+    _interleave = bool(_cfg0.get("interleave_attempts")
+                       or args.interleave_attempts)
+    # Gate it to thin cards. Interleaving only matters when the build
+    # UNDERFILLS -- a deep slate attempts every spec regardless, so reordering
+    # changes only who gets first pick of players and exposure headroom. And
+    # the measurement says the benefit is confined there: dBest by depth reads
+    # thin +1.84 (3 of 4 dates, 0 losses), mid -0.78 (3/3), deep +1.05 (4/4).
+    # Same conditional shape as the per-team coverage guarantee, and it makes
+    # the arm a strict superset of minspend49cov on any card over N games.
+    _ilv_max_games = int(_cfg0.get("interleave_max_games", 0)
+                         if args.interleave_max_games is None
+                         else args.interleave_max_games)
+    if _interleave and _ilv_max_games and n_games > _ilv_max_games:
+        _interleave = False
+    if _interleave:
+        print("attempt order: teams interleaved (tiers still assigned on "
+              "block order)")
     _deepcover = False
     _covmin = int(_cfg0.get("cover_min_size", 0) if args.cover_min_size is None
                   else args.cover_min_size)
@@ -2159,7 +2309,7 @@ def main():
         sys.exit("--stack-sizes needs three numbers: ceiling,core,contrarian")
     specs = make_specs(alloc, n_gpp, sizes=sizes, all_teams=_allteams, per_team=_perteam,
                        tier_by_count=_tierbycount, guar_size=_guar_size,
-                       guar_sizes=_guar_ladder)
+                       guar_sizes=_guar_ladder, interleave=_interleave)
     # The DELIVERED tier mix can drift from this, because a spec that cannot
     # build is dropped and the seed refill pulls a different slice of the
     # list. Print both so the two are never confused again: CEILING read 5.2%
@@ -2193,6 +2343,30 @@ def main():
     hfloor = (cfg.get("hitter_min_salary") if args.hitter_min_salary is None
               else (args.hitter_min_salary or None))
     b.hitter_min_salary = hfloor
+    b.secondary_size = int(cfg.get("secondary_stack", 0)
+                           if args.secondary_stack is None
+                           else args.secondary_stack)
+    # Confine it to short cards. Measured 09/09 over 27 slates against
+    # minspend49cov, collapsed to dates:
+    #
+    #     thin <=4   +2.70   4 better / 0 worse
+    #     mid  5-7   +1.61   5 / 1
+    #     deep 8+    -4.88   3 / 5   (and -30.7 of that is one date, 09_06)
+    #
+    # The sign flip has the mechanism the 08/30 note already predicted: two
+    # 3-man runs need two teams to erupt where one 5-man run needs one, so a
+    # split only pays where the pool is too thin to build another good single
+    # stack. The old -6.39 verdict was nine slates weighted toward deep cards
+    # -- aggregated over the wrong axis, exactly like the per-team guarantee
+    # that read -2.81 unconditionally and +8.42 once confined to thin cards.
+    _sec_max_games = int(cfg.get("secondary_max_games", 0)
+                         if args.secondary_max_games is None
+                         else args.secondary_max_games)
+    if b.secondary_size and _sec_max_games and n_games > _sec_max_games:
+        b.secondary_size = 0
+    if b.secondary_size:
+        print(f"secondary stack: {b.secondary_size} bats from a second team, "
+              f"placed before fills")
     b.fill_floor = int(cfg.get("fill_floor", 0) if args.fill_floor is None
                        else args.fill_floor)
     _ex = (args.fill_floor_exempt if args.fill_floor_exempt is not None
@@ -2289,6 +2463,7 @@ def main():
             # teams rather than hammering the top of the allocation.
             full = make_specs(alloc, args.lineups, sizes=sizes, all_teams=_allteams, per_team=_perteam,
                               guar_size=_guar_size, guar_sizes=_guar_ladder,
+                              interleave=_interleave,
                        tier_by_count=_tierbycount)
             off = (k * short) % max(1, len(full))
             more = (full + full)[off:off + short]

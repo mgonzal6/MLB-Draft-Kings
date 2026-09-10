@@ -1365,6 +1365,147 @@ as of 09/09.
 
 Kept behind `--all-team-sizes`, default off (`team54`). NOT shipped.
 
+## 09/09: rank 11 by 1.10, and the winners were TWO-TEAM SPLITS
+
+3 contests, 43 entries, 4-game card, `minspend49cov` merged with `covnofloor`
+to fill. Standings verified final (0 entries with time remaining).
+
+    contest      field  ours    best  rank    10th     gap  top10
+    195370063      237     7   97.55    20  110.50  -12.95      0
+    195370071    1,189    16  132.55    11  133.65   -1.10      0
+    195370072    1,189    20  124.55    18  133.65   -9.10      0
+
+All 43: best 132.55, mean 80.35, worst 37.50. Second time the project has
+finished 11th by around a point (08/30 was rank 11 by 0.50).
+
+**Almost nothing went wrong except the SHAPE.** SD was in 27 of 30 top-10
+lineups and we were heavy on it. We held the slate's top scorer -- Jackson
+Merrill 47.0 at 13.3% owned -- in 9 of 24 lineups. Only two top-10 players
+were outside our pool and both busted (1.4 and 3.0). The three winners:
+
+    195370063  152.55   STL 4 + SD 3
+    195370071  152.55   STL 4 + SD 3
+    195370072  144.50   SD 4 + STL 3
+
+**Zero of our 24 distinct lineups held SD 3+ AND STL 3+.** Seventeen were
+single 5-stacks. STL was in 15 of 30 top-10 lineups and we had two STL
+stacks -- and STL was ALLOCATED 12, identical to SD.
+
+    TOP 10 (n=30)   worst4 17.32   top3 82.85   zeros 0.53   total 132.52
+    OURS  (n=43)    worst4  6.04   top3 55.33   zeros 2.53   total  80.35
+
+## The SECONDARY STACK is not dead -- the 08/30 verdict was the wrong AXIS
+
+`--secondary-stack N` places a contiguous run of N bats from a second team
+before the fill loop: CEILING becomes 5+3, CORE 4+3, CONTRARIAN 3+3. Second
+team ranked by implied total, sampled from the top four, never the primary,
+never a team our SPs oppose, never faded.
+
+08/30 measured a secondary 3-man stack at **-6.39 over nine slates** against
+control and the file closed the question. Retested 09/09 on 27 slates against
+minspend49cov with placement scoring, collapsed to dates:
+
+    arm     depth        dates   dBest    SE      t    better/worse
+    sec3    thin <=4         4   +2.70   1.98  +1.36      4 / 0
+            mid 5-7          6   +1.61   1.47  +1.09      5 / 1
+            deep 8+          8   -4.88   4.06  -1.20      3 / 5
+    sec2    thin <=4         4   -1.13   4.34  -0.26      2 / 2
+            mid 5-7          6   +0.42   2.12  +0.20      4 / 2
+            deep 8+          8   -4.08   1.64  -2.49      2 / 6
+
+**The sign depends entirely on DEPTH**, and the 08/30 set was weighted toward
+deep cards. The old number was not wrong, it was aggregated over the wrong
+axis -- the same error as the per-team 5-stack guarantee, which read -2.81
+unconditionally and +8.42 once confined to thin slates.
+
+**The mechanism was stated BEFORE the data, in the 08/30 note that killed
+it:** "two 3-man runs need two teams to erupt, one 5-man run needs one." That
+predicts a split pays only where the pool is too thin to build another good
+single stack -- thin and mid, not deep. That is exactly where it lands, which
+is why this is treated differently from the four ideas that failed this week.
+
+Caveat on the deep row: 09_06 alone reads **-30.7** against -7.9, -5.5, -3.9,
+-3.4 and three positives. Drop it and deep is roughly flat. The deep loss is
+less established than the thin/mid gain.
+
+`sec2` is dead -- weakest thin cell and a genuine deep loss at t -2.49.
+
+**`secthin` = sec3 gated at <=7 games. Verified as a strict superset:** deep
+8+ returns +0.00 with SE 0.00 on all 65 pairs. Pooled over 27 slates it reads
+bestAvg 146.8 against 145.5 and gap -1.21 against -2.51 -- the best gap-to-
+10th measured here -- on 9 of 10 decisive dates.
+
+NOT SHIPPED. Four thin dates and six mid ones do not clear the bar that
+shipped minspend49cov (10 of 11 dates, t 3.53). Kept as `--secondary-stack`
+/ `--secondary-max-games`.
+
+## Attempt order is a SEPARATE question from tier assignment
+
+The narrow fix flagged when the 5,4 ladder failed, now built and measured.
+`make_specs` used spec position for two different jobs: assigning tiers
+(CEILING to the first n_ceil, CONTRARIAN to the last n_cont) AND setting the
+order the builder attempts them. `--interleave-attempts` reorders ONLY the
+second, after tagging, so every spec keeps the tier it was assigned on the
+block-ordered list and no lineup moves between teams.
+
+    arm       depth        dates   dBest    SE      t    better/worse
+    ilv       thin <=4         4   +1.84   1.34  +1.37      3 / 0
+              mid 5-7          6   -0.78   1.36  -0.57      3 / 3
+              deep 8+          8   +1.05   1.69  +0.62      4 / 4
+
+Compare the three attempts at the SAME complaint:
+
+    team54  (moves lineups between teams)      thin -5.62   0 / 2
+    ilv     (moves nothing, reorders attempts) thin +1.84   3 / 0
+    sec3    (changes lineup shape)             thin +2.70   4 / 0
+
+The distinction holds: redistributing lineups away from the best offence
+loses; changing WHICH specs get attempted when the build exhausts does not.
+
+**`ilvthin` = gated at <=4 games, verified strict superset** -- mid and deep
+both +0.00 SE 0.00 across 105 pairs. Confining it also contains the top-10
+cost, which was spread across all depths ungated (thin -0.40, mid -0.30, deep
+-0.12 per portfolio).
+
+NOT SHIPPED, on four thin dates. Kept as `--interleave-attempts` /
+`--interleave-max-games`.
+
+**Top-10 count disagreed with `best` on FOUR consecutive arms this week**
+(ilv, ilvthin, sec3, secthin all raise bestAvg and lower top10). The standing
+resolution is that `best` scores because top-10 count is the noisiest column,
+but four in a row is worth watching rather than assuming.
+
+## `merge_arms.py`: cross-arm fill, and the gate that was measured wrong
+
+The 09/07 and 09/09 hand-merges are now a script. A thin slate caps the
+portfolio below the entry count and the shortfall becomes DUPLICATES, which
+score identically to their twin and are worth zero extra draws; a distinct
+lineup from another arm is worth one.
+
+**The concentration gate had the wrong counterfactual and rejected every
+donor.** First version admitted a donor only if it made no exposure worse.
+On the 09/07 snapshot that rejected all 19 distinct donors, because the base
+already held one bat at 64% against a 20% cap and nearly every donor from the
+same pool contains him.
+
+That test compares a donor against an EMPTY SLOT. The real alternative is a
+DUPLICATE, which contains the same players and adds no draw -- so refusing the
+donor does not protect concentration, it forfeits a shot. The gate now allows
+the worst exposure to drift up to `--tolerance` (default 5 points) above the
+BASE portfolio's worst, measured against the base so one admission cannot
+ratchet the bar.
+
+Re-run on the same 3-game snapshot: **33 -> 47 distinct, zero duplicates, and
+the worst bat exposure FELL 64% -> 55%** because the donors diluted it. The
+strict gate had been rejecting the very lineups that reduce concentration.
+
+**Choose donors that share the base's measured components.** minspend49cov +
+ilvthin differ only in attempt order, so their disagreements are exactly the
+lineups the other never reached and nothing measured is diluted.
+minspend49cov + covnofloor was used on 09/09 and DILUTES the salary floor --
+that portfolio came out at a 48,042 mean with one lineup at 42,400, against a
+floor worth -4.08 dBest on deep slates and -3.79 on mid when removed.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
