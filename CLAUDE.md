@@ -1731,6 +1731,59 @@ diluting the floor, worth -4.08 dBest on deep slates.
 Five of the entered lineups already cleared 110.50. Contest selection remains
 the only thing measured this week that turns that slate into a top-10 finish.
 
+## 09/10: TOP-10, and the lineup came from a DONOR arm
+
+3-game card, 47 entries, 3 contests. Standings verified final.
+
+    contest      field  ours    best  rank    10th     gap  top10
+    195473811      237     7   87.20    70  103.45  -16.25      0
+    195473819    1,189    20  110.70    10  110.70   +0.00      1
+    195473820    1,189    20   99.05    84  111.05  -12.00      0
+
+Rank 10 of 1,189, exactly on the bar. All 47: best 110.70, mean 81.21.
+
+**The top-10 lineup came from `ilvthin`, a DONOR, not the base arm:**
+
+    source        n    best     mean
+    base         24    97.70    77.16
+    ilvthin      14   110.70    83.63   <- the top-10 finish
+    covnofloor    9    94.05    85.45
+
+**Without the merge the best lineup was 97.70 -- 13 points under the bar.**
+ilvthin also held the 3rd-best (96.30). The base arm alone finishes ~80th.
+
+The lineup was an SEA five-stack with both aces: Logan Gilbert 32.1, Zack
+Wheeler 27.6, Julio Rodriguez 18.0. **SEA was one of the two teams on
+PROJECTED batting orders** -- the `--allow-unconfirmed` call is what made it
+reachable at all, because the feed at 08:18 had SEA and TEX unposted and their
+game did not start until 4:10 PM ET while first pitch was 12:15 PM ET.
+Waiting was NOT free on this card; waiting meant not entering.
+
+**This is the first live evidence for cross-arm fill**, which the file had
+recorded as "a live technique with sound reasoning and no measurement". One
+slate, but unambiguous: the entire finish traces to a donor.
+
+**And it cuts against the 09/09 amendment.** That entry records the marginal
+donor lineup as coming "from the bottom of the pool" -- 9 added lineups
+topping out at 116.90 and changing nothing. Today the donors produced the
+BEST lineups in the portfolio. Both are real. The honest reading is that donor
+QUALITY is slate-dependent and not predictable in advance, not that donors are
+reliably weak or reliably strong. Budget for the technique adding draws; do
+not budget for where in the distribution they land.
+
+**What still went wrong, and both are already-documented defects:**
+
+  * **TEX was hard-faded and appeared in 10 of 30 top-10 lineups.** HOU led
+    with 13 of 30 and we held 12 HOU stacks (up from ONE before the merge --
+    the merge helped there too). TEX we held 4. That is the FOURTH time a
+    faded team has landed in the top-10 lineups (ATH 09/07, TEX 09/08,
+    TEX 09/06, TEX 09/10).
+  * **The 237-entry contest got our weakest slice** -- best 87.20, rank 70
+    against a 103.45 bar, while the portfolio's best lineup went to a
+    1,189-entry field. That is exactly the "small contests get the HEAD of
+    the portfolio" defect, still unfixed, and it is the contest the selection
+    study says is most winnable.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
