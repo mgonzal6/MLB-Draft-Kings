@@ -330,6 +330,14 @@ VARIANTS = {
     "ilvthin": {"score": None, "top": 1, "min_total_salary": 49000,
                 "hard_min_salary": True, "seeds": 8, "all_team_five": True,
                 "interleave_attempts": True, "interleave_max_games": 4},
+    # ---- same-game SP pair, 09/10 ----------------------------------------
+    # See the comment in Builder.__init__. The hitter-side opposing-SP ban is
+    # untouched, so a same-game pair still bans BOTH those teams' bats -- the
+    # lineup has to stack somewhere else entirely, exactly as 09/10's winner
+    # did (HOU x5 behind Gilbert + deGrom).
+    "samegame": {"score": None, "top": 1, "min_total_salary": 49000,
+                 "hard_min_salary": True, "seeds": 8, "all_team_five": True,
+                 "allow_same_game_sp": True},
     # ---- secondary stack, RETESTED 09/09 ---------------------------------
     # sec3 pairs every primary with a 3-man run from a second team: CEILING
     # becomes 5+3 (all eight hitter slots), CORE 4+3, CONTRARIAN 3+3. That is
@@ -1267,6 +1275,23 @@ class Builder:
         # Contiguous run of N bats from a SECOND team, placed before the fill
         # loop. 0 = off (historical behaviour).
         self.secondary_size = 0
+        # Allow both starters of the SAME game in one lineup.
+        #
+        # 09/10 is why this exists. First place in the 1,189-entry contest
+        # scored 119.05 against our 110.70, and it was NOT a lottery lineup --
+        # its eight hitters totalled 50 points with a zero among them. It won
+        # on TWO PITCHERS: Logan Gilbert 32.1 (41.4% owned) and Jacob deGrom
+        # 36.9 (59.0% owned), 69.0 of the 119.05.
+        #
+        # We rostered both. deGrom 20 of 47, Gilbert 16 of 47 -- the two
+        # highest adj_blended on the card (23.79 and 23.48), bought heavily and
+        # correctly. We never PAIRED them, because they start against each
+        # other in TEX@SEA and _form_pairs bans same-game pairs outright.
+        #
+        # The ban is sound on average: opposing starters cancel, since one
+        # team's runs are the other pitcher's damage. It has never been
+        # measured. On a 3-game card it removes a third of all possible pairs.
+        self.allow_same_game_sp = False
         self.hitter_min_own = None
         self.min_total_salary = None
         # When set, the min-spend ladder does NOT bend. The ladder exists so a
@@ -1368,7 +1393,8 @@ class Builder:
         pair_cap = PAIR_CAP
         if cap:
             legal = sum(1 for i, a in enumerate(elig) for b in elig[i + 1:]
-                        if self.game_map[a["team"]] != self.game_map[b["team"]]
+                        if (self.allow_same_game_sp
+                            or self.game_map[a["team"]] != self.game_map[b["team"]])
                         and a["salary"] + b["salary"] <= cap)
             pair_cap = max(PAIR_CAP, -(-self.n_lineups // max(1, legal)))
         # Pass 1 honours the cap. Pass 2 exists only when a cap is set: rather
@@ -1402,7 +1428,8 @@ class Builder:
             for b in pool:
                 if a["name"] == b["name"]:
                     continue
-                if self.game_map[a["team"]] == self.game_map[b["team"]]:
+                if (not self.allow_same_game_sp
+                        and self.game_map[a["team"]] == self.game_map[b["team"]]):
                     continue
                 if cap is not None and a["salary"] + b["salary"] > cap:
                     self.reject["SP pair over salary cap"] += 1
@@ -1505,7 +1532,8 @@ class Builder:
         self.cash_hitter_cap = max(2, round(CASH_HITTER_CAP_PCT * n_cash))
         arms = [s for _, s in self.sp_df.iterrows() if self.caps[s["name"]] > 0]
         legal = [(a, b) for i, a in enumerate(arms) for b in arms[i + 1:]
-                 if self.game_map[a["team"]] != self.game_map[b["team"]]]
+                 if (self.allow_same_game_sp
+                     or self.game_map[a["team"]] != self.game_map[b["team"]])]
         self.n_pairs = len(legal)
         self.best_pair_blended = max(
             (a["adj_blended"] + b["adj_blended"] for a, b in legal), default=0.0)
@@ -2053,6 +2081,11 @@ def main():
     ap.add_argument("--cover-min-per", type=int, default=None,
                     help="how many guaranteed coverage stacks each team gets "
                          "on a deep slate (default 1), emitted round-robin")
+    ap.add_argument("--allow-same-game-sp", action="store_true",
+                    help="let both starters of one game appear in the same "
+                         "lineup. Normally banned because opposing arms "
+                         "cancel; on 09/10 the winning lineup was exactly "
+                         "that pair and we held both arms separately")
     ap.add_argument("--secondary-max-games", type=int, default=None,
                     help="only build a secondary stack at or below this many "
                          "games (0 = always). It measures +2.70 on thin cards "
@@ -2343,6 +2376,10 @@ def main():
     hfloor = (cfg.get("hitter_min_salary") if args.hitter_min_salary is None
               else (args.hitter_min_salary or None))
     b.hitter_min_salary = hfloor
+    b.allow_same_game_sp = bool(cfg.get("allow_same_game_sp")
+                                or args.allow_same_game_sp)
+    if b.allow_same_game_sp:
+        print("SP pairs may come from the SAME game (opposing starters)")
     b.secondary_size = int(cfg.get("secondary_stack", 0)
                            if args.secondary_stack is None
                            else args.secondary_stack)

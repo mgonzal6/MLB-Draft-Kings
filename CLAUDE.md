@@ -2621,3 +2621,35 @@ feasibility reduction and the caps scale off the request.
 `build_portfolio.py` is stdlib + pandas + `lineup_id`; nothing Windows-only.
 The `G:\` paths are argparse defaults, overridable with `--export`. Keep it
 that way so the harness can drive it from anywhere.
+
+## Same-game SP pairs: positive on thin cards only. Not shipped.
+
+09/10's winner scored 119.05 against our 110.70, and it was not a lottery
+lineup -- its eight hitters totalled 50 points with a zero among them. It won
+on TWO PITCHERS from the same game: Logan Gilbert 32.1 (41.4% owned) and
+Jacob deGrom 36.9 (59.0% owned), 69.0 of the 119.05. We rostered both --
+deGrom 20 of 47, Gilbert 16 of 47, the two highest adj_blended on the card --
+and never PAIRED them, because `_form_pairs` bans same-game pairs outright.
+
+`--allow-same-game-sp` lifts that ban. On the 09/10 snapshot it built 30
+lineups against the base's 24 (more legal pairs = more constructions) and
+produced 3 deGrom+Gilbert lineups. 28 slates x 5 seeds, collapsed to dates:
+
+    depth        dates   dBest    SE      t    better/worse
+    thin <=4        5    +2.39   1.69  +1.41      3 / 1
+    mid 5-7         6    -0.85   1.61  -0.52      3 / 3
+    deep 8+         8    -1.71   1.09  -1.56      3 / 4
+
+    pooled: bestAvg 142.0 vs 142.8, top10 29.8 vs 30.4
+
+Same depth split as secthin, predicted in advance and for the same reason: on
+a starved pair pool a same-game pair adds legal constructions; on a deep card
+there are plenty of better pairs and you are just buying a cancellation. The
+ban is correct on average -- opposing starters cancel, because one team's runs
+are the other pitcher's damage -- and 09/10 is the case where it cost us.
+
+Note the hitter-side opposing-SP ban is untouched, so a same-game pair still
+bans both those teams' bats: the lineup must stack elsewhere entirely, which
+is exactly what 09/10's winner did (HOU x5 behind the two aces).
+
+Kept behind `--allow-same-game-sp`, default off (`samegame`). NOT shipped.
