@@ -53,6 +53,13 @@ mid-pack finishes the portfolio is not built for. 08/29 evening made the point:
 thing that actually differed was a best lineup 5.1 points off the bar instead
 of 48. Report where lineups LANDED: best rank, gap to 10th, top-10 count.
 
+> **THAT RULE IS RIGHT FOR JUDGING ARMS AND WRONG FOR CHOOSING CONTESTS.**
+> Amended 09/10, the first time a payout table was available. Scoring an ARM
+> on ROI still confounds the build with the field. But deciding WHICH contest
+> to enter is a pure dollar question, and answering it without dollars is how
+> we ended up evaluating a winner-take-all we can never win. See "WE BEAT THE
+> FIELD BY 4.6% AND THE RAKE IS 15.9%" below.
+
 **Selection compresses spread, always.** Per-portfolio sd: 27.20 with no
 scoring, 25.86 with a score at top=5, 25.19 with score plus floor. Choosing
 the best of N pulls lineups toward the same players. So `n_candidates=1` is
@@ -1783,6 +1790,106 @@ not budget for where in the distribution they land.
     1,189-entry field. That is exactly the "small contests get the HEAD of
     the portfolio" defect, still unfixed, and it is the contest the selection
     study says is most winnable.
+
+## WE BEAT THE FIELD BY 4.6% AND THE RAKE IS 15.9%
+
+09/10, the first dollar analysis in the project. Three real contests priced
+against our own 1,269 entered lineups. This is the most important measurement
+here and it reframes the objective.
+
+**The recurring number.** In every structure tested, our cash rate lands
+almost exactly ON the payout line:
+
+    28,000-entry GPP    we cash 10.64%    it pays 10.70%
+    1,189-entry flat    we cash 23.13%    it pays 23.30%
+
+Our portfolio is, in aggregate, an average entry. Everything then turns on the
+rake.
+
+**The 1,189-entry contest, $0.10 entry, 20 max, pays 277 places (top 23.3%):**
+
+    a perfectly average entry earns   $100 / 1189 = $0.0841
+    we earn (735 entries in           $0.0880
+      comparable 800-2000 fields)
+    our edge over the field           +4.6%
+    the rake                          15.9%
+    ROI                               -12%
+
+**We are genuinely better than the field -- by about a third of what we need.**
+That is the clearest statement of where three weeks of work has landed. Not
+"we cannot pick lineups": we beat the average entry. Just not by enough to
+clear the house cut.
+
+**The other two structures are much worse, and for the same reason.**
+
+    28,000-entry GPP, $0.50, 150 max, 27% of the pool in the top 10 places
+      EV $0.307/entry -> ROI -39%
+      we have finished top 0.1% in 0 of 1,269 entries
+
+    237-entry WINNER-TAKE-ALL, $0.25, 7 max, $50 to first
+      resampled 7 of our lineups 4,000x per contest, over 6 contests of that
+      size: P(win) = 0.00%, EVERY TIME. ROI -100%.
+      1st place averages 150.4; our E[best|7] is 96.94-128.32, short by 25-38
+      AND VOLUME CANNOT FIX IT: E[best|150] = 144.37, still BELOW the typical
+      winning score, and the cap is 7 anyway.
+
+**Both price the extreme tail and we do not have one.** Our distribution is
+reliably good, never great: cash 10.6%, top 1% at 1.34%, top 0.1% at ZERO of
+1,269. Median best lineup 127.65 against winning scores of 150+.
+
+**What fits: small-to-mid fields that pay MANY places, flat.** The 1,189
+contest above is the right shape and is only -12%. Avoid winner-take-all at
+any size and top-heavy GPPs in huge fields -- both are priced on a capability
+measured as absent.
+
+**THE OBJECTIVE SHOULD CHANGE.** "A top-10 FINISH" was the right proxy with no
+payout data. With it, the real target is **beat the field by more than the
+rake**, and the two are different:
+
+  * top-10 chasing rewards the extreme tail, where we are 0 for 1,269
+  * beating the rake rewards moving the WHOLE distribution up a few points
+
+The second is what our tools actually do. Every arm that measured positive
+moves the whole portfolio, not the tail -- the salary floor (-4.08 to remove),
+the thin-slate coverage guarantee (+8.42), secthin (+2.70 thin / +1.61 mid).
+Twelve attempts to buy the tail have all failed.
+
+**Closing a 15.9% gap needs one of two things:** a lower-rake contest, or
+moving our whole distribution up roughly 4 points of percentile. NOT a better
+tail. Do not propose another ceiling arm.
+
+**Caveat.** Percentiles are mapped from contests of 237-7,134 entries onto
+the target field, which assumes our finishing percentile transfers across
+field sizes. Bigger fields are tougher, so the 28k number is optimistic. The
+1,189 figure is the most trustworthy because 735 of our entries came from
+contests of that size.
+
+## Entry-cap arithmetic: what 5, 7, 20 and 150 draws are worth
+
+Resampled from our own entered lineups, pooled by slate:
+
+    draws   E[best]   clears a 113.84 small-field bar
+        5    114.28    7 of 16 slates  (44%)
+        7    119.24   10 of 16         (63%)
+       20    133.07   15 of 16         (94%)
+      150    144.37   15 of 16         (94%)
+
+    mean gain 20 -> 40 draws  +10.22
+    mean gain 20 -> 80 draws  +19.01
+
+**More draws raises the BEST lineup and does NOT change EV per entry.** Each
+lineup faces the same distribution; volume buys more tickets at the same odds.
+It is a variance trade. So "enter 150 in one big contest to fix the allocation
+problem" is sound on allocation and irrelevant to profitability.
+
+**And the bar scales with field size far faster than our ceiling scales with
+draws.** 20 -> 150 draws buys +11 points. Moving from a 237-field to a
+28,000-field costs ~76 points of bar. That asymmetry is why contest selection
+beats every construction change.
+
+Note the earlier "our best cleared 113.84 on 54 of 69 slates" was computed
+from our ACTUAL best per contest, which came off ~20 entries. At a 5-7 entry
+cap it is 44-63%, not 78%.
 
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
