@@ -1791,6 +1791,62 @@ not budget for where in the distribution they land.
     the portfolio" defect, still unfixed, and it is the contest the selection
     study says is most winnable.
 
+## CORRECTION 09/11: WE DO NOT BEAT THE FIELD. WE ARE BELOW AVERAGE.
+
+The section below claims a +4.6% edge over the field. **That number is wrong
+and the error was mine.** It compared our gross expected payout against
+`pool / field` -- which is what a random entry earns AFTER the rake has
+already been taken out. Comparing a pre-rake quantity to a post-rake one and
+reading the gap as skill.
+
+Done correctly, our finishing percentiles against a neutral entry:
+
+    field        entries  median pct  mean pct  top 23.3%  top 10.7%
+    <300              35       48.9      47.3     25.7%     17.1%
+    300-800           43       62.5      58.2     16.3%      7.0%
+    800-2k           735       54.7      52.7     23.1%     13.1%
+    >2k              436       61.0      58.2     15.6%      6.9%
+    ALL            1,249       57.0      54.7     20.3%     10.8%
+
+    a NEUTRAL entry reads    50.0      50.0     23.3%     10.7%
+
+**Median finish 57.0 against a neutral 50.0.** We land below the middle of
+the field. `contest_ev.py` now computes edge correctly -- our EV against the
+AVERAGE entry's gross EV, both pre-rake -- and every payout shape reads
+negative:
+
+    shape              pays   our edge
+    winner-take-all    0.1%   -100.0%
+    top-heavy GPP     10.7%    -14.7%
+    flat deep GPP     23.3%    -13.2%
+    very flat         35.0%    -10.2%
+    double-up         45.0%    -14.2%
+    50/50             50.0%    -13.4%
+
+**There is no edge for a contest choice to protect.** Shape still matters --
+`very flat` at -10.2% is far better than winner-take-all at -100%, so choosing
+well is worth 5-10 points of ROI -- but it changes how fast you lose, not
+whether you lose. The 1,189 contest is not -12%; corrected it is nearer -27%.
+
+**The cash-rate coincidence was the tell and I misread it.** "Our cash rate
+lands almost exactly ON the payout line" (10.64% vs 10.70%, 23.13% vs 23.30%)
+is not evidence of a small edge. It is what an AVERAGE entry looks like, and
+we are slightly worse than that -- 20.3% against 23.3% over the full set.
+
+**The target is now concrete and measurable.** For a curve paying the top
+23.3%, we currently land there 20.3% of the time. Neutral is 23.3%. Beating a
+15.9% rake needs roughly 27%. So the question is whether anything moves the
+MEDIAN of the portfolio from the 57th percentile toward the 50th and below --
+not whether anything raises `best`.
+
+**One cell is not negative:** sub-300 fields read median 48.9 and top-23.3% at
+25.7%, slightly better than neutral. It is 35 entries, which is nothing. Worth
+watching as more small contests accumulate, and NOT worth acting on.
+
+**Every arm in this file was designed and scored for `best`.** Optimising the
+portfolio's percentile distribution is a genuinely unexplored design space --
+which is the honest reason to keep going, and not a prediction that it works.
+
 ## WE BEAT THE FIELD BY 4.6% AND THE RAKE IS 15.9%
 
 09/10, the first dollar analysis in the project. Three real contests priced
