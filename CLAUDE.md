@@ -2051,6 +2051,79 @@ resurrect the graveyard.
 **Still short.** 0.9216 against a 1.159 break-even. The arm closes about a
 third of the gap to profitability and the rest is not there yet.
 
+## FILL FLOORS ON EV: the floors bind, cut ~3% of the zero gap, and pay nothing
+
+Run 09/11 on the `median_study` finding that zeros and worst4 vary
+MONOTONICALLY across the whole field distribution -- the shape this file calls
+actionable, because we can move along it:
+
+    band           zeros   worst4     top3   own sum
+    top 1%          0.73    20.01    82.08     150.3
+    25-50%          1.81     7.82    61.16     173.7
+    75-100%         3.01     1.27    44.27     161.1
+    OURS            3.38     5.32    47.45     108.7
+
+Our zeros are worse than the field's BOTTOM quartile. Hitter floors had been
+tested only on `best` (-10.03 and -18.54 on 08/30) and never on EV, so the
+pre-registered claim was that `best` had been the wrong yardstick for them.
+28 slates x 5 seeds, 560 builds, 0 failures, collapsed to the 18 dates:
+
+    arm            dEV      SE     t     b/w      dBest    t      abs EV
+    minspend49cov    --      --    --      --        --    --     0.9216
+    fillfloor30   +0.009  0.065  +0.14   8 / 9     +0.1   +0.11   0.9298
+    fillfloor35   -0.058  0.091  -0.64   8 / 9     +1.1   +0.49   0.9181
+    hitfloor3000  -0.109  0.088  -1.24   6 / 11    -3.8   -1.92   0.8462
+
+**Nothing. Same answer as `fillopp49` (+0.011) eight hours earlier, from a
+hypothesis that had a mechanism behind it rather than just a positive dMean.**
+
+**`hitfloor3000` -- a flat 3,000 floor with no CONTRARIAN exemption -- is a
+genuine loss**, and worst on deep slates: dBest -6.43, t -2.86, 1 better /
+7 worse. That reproduces 08/30's -10.03/-18.54 on the new metric instead of
+overturning it. The tier exemption is the only thing keeping fillfloor30/35
+off the same number.
+
+**THE MECHANISM CHECK IS THE POINT OF THIS ENTRY.** The sweep scores `ev` and
+cannot say whether an arm did what it was built to do. Rebuilt all four arms
+over the same slates and counted zeros against realised FPTS, ~1,345 lineups
+per arm, collapsed to dates:
+
+    arm            dZeros    t     b/w     dWorst4    t     dTop3     t
+    fillfloor30    +0.026  +0.39  11/7     -0.083  -0.46   +0.06   +0.15
+    fillfloor35    -0.100  -1.51   5/13    +0.415  +1.79   +0.16   +0.25
+    hitfloor3000   +0.103  +1.36  11/7     -0.273  -1.23   -1.04   -1.86
+
+**The floors BIND and they move the target by about 3% of the gap.**
+fillfloor35 cuts 0.100 zeros a lineup, on 13 of 18 dates -- the right sign --
+against a 1.6-zero gap to the field's own MIDDLE band. worst4 rises +0.415
+against a 14.7-point gap to the top 1%. Real, consistent, and two orders of
+magnitude too small to matter.
+
+**And a price floor cannot cut zeros in the first place.** `hitfloor3000`
+buys strictly more expensive bats and finishes with MORE zeros (+0.103) and a
+lower top3 (-1.04, t -1.86) and a lower total (-1.97, t -2.12). Salary
+predicts hitter FPTS at +0.111; a zero is a player who did not produce that
+night, and that is close to price-independent. Paying up buys a costlier
+coin flip, so the budget leaves the top of the lineup instead -- which is
+where the payout thresholds are.
+
+**So the monotonic band table is a CORRELATE of picking right, not a lever.**
+Lineups that finish top 1% have 0.73 zeros because their players erupted, not
+because their builder screened for floor. This is the ownership detour and
+the `bs` detour arriving a third time: a real, well-measured, strongly
+monotonic feature of winning lineups that cannot be bought directly.
+
+Kept as `--fill-floor` / `--fill-floor-exempt`, default off. NOT shipped.
+
+**Two process notes from the run.** The mechanism check was first launched
+SERIAL and piped through `tail`, so it buffered to zero bytes for 33 minutes
+and would have taken ~2.5h; re-run at `--jobs 6` with per-build scratch dirs
+it took 24 minutes. A tripwire that costs more than the sweep it checks will
+not get run. And `backtest_variants` prints "no control arm in this run --
+skipping paired deltas" when control is absent, which is correct but silent
+about the fact that the pooled table is then the ONLY output -- the paired
+collapse has to be done by hand off `backtest_variants.csv`.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.
