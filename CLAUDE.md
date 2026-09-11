@@ -1791,6 +1791,57 @@ not budget for where in the distribution they land.
     the portfolio" defect, still unfixed, and it is the contest the selection
     study says is most winnable.
 
+## CORRECTION TO THE CORRECTION: SPLIT THE ERAS. SINCE 09/03 WE ARE AHEAD.
+
+The section below pools 1,249 entries across a REGIME CHANGE and reads the
+average as the current state. It is wrong for the same class of reason the
+first version was -- averaging over something that is not homogeneous. The
+user pushed back ("contests have been doing really well, confused that we are
+predicted to do bad") and was right.
+
+    era             entries   median   top 23.3%   top 10.7%
+    BEFORE 09/03        613     64.1      16.3%       8.2%
+    09/03 ONWARD        656     52.9      23.8%      13.0%
+    NEUTRAL                     50.0      23.3%      10.7%
+
+09/03 is when the harness defects were fixed and `minspend49` shipped. Before
+it we were badly below average; since, we are AT the cash line and **+21%
+relative in the top tenth** (13.0% against a neutral 10.7%).
+
+**Repriced on post-09/03 entries only, our edge is POSITIVE against every GPP
+shape:**
+
+    shape              edge PRE    edge POST   break-even rake
+    top-heavy GPP       -39.1%       +8.1%          7.5%
+    very flat           -26.4%       +5.0%          4.8%
+    flat deep GPP       -31.1%       +3.6%          3.4%
+    double-up           -24.2%       -4.8%           --
+    50/50               -22.0%       -5.4%           --
+
+**The edge is real and smaller than the rake.** Best case sustains a 7.5%
+rake; DK charges 10-20%. So the position is "beating the field, not the
+house", by a gap roughly HALF what the pooled number claimed.
+
+**Our edge is strongest against TOP-HEAVY shapes, not flat ones**, which
+inverts the 09/10 advice. The reason is in the bands: +21% relative in the
+top 10.7% against only +2% at the 23.3% cash line. The advantage sits near
+the top of our distribution, which top-heavy curves pay for and flat ones do
+not. **Double-ups and 50/50s are now the WORST fit** (-4.8%, -5.4%) --
+retrospective support for the user's decision to stop entering them, and for
+retiring Fix #18.
+
+**Caveats that matter.** 656 entries over 8 days, one builder, one stretch of
+slates; a hot run looks exactly like this. The improvement coincides with
+minspend49 shipping AND the harness fixes AND three unusually good thin
+slates, and this sample cannot separate arm quality from slate luck. Do not
+treat +8.1% as the number until ~300 more entries accumulate.
+
+**Methodological rule this cost twice in one night.** Do not pool entries
+across a shipped-arm change or a harness fix. The file already says to
+compare arms within a slate and never across slates; the same applies to
+comparing the PORTFOLIO across eras. Split at 09/03 (harness fixes +
+minspend49) and again at 09/07 (minspend49cov) when the sample allows.
+
 ## CORRECTION 09/11: WE DO NOT BEAT THE FIELD. WE ARE BELOW AVERAGE.
 
 The section below claims a +4.6% edge over the field. **That number is wrong
