@@ -1891,6 +1891,59 @@ Note the earlier "our best cleared 113.84 on 54 of 69 slates" was computed
 from our ACTUAL best per contest, which came off ~20 entries. At a 5-7 entry
 cap it is 44-63%, not 78%.
 
+## EV SCORING: built 09/10, and it rescued NOTHING. dMean is not dEV.
+
+`backtest_variants.py` now scores every portfolio on `ev` -- expected return
+per entry in ENTRY-FEE MULTIPLES against `PAYOUT_PCT`, the real 1,189-entry
+curve (1st = 100x, down to 2x for 118th-277th, 277 of 1,189 paid). Percentiles
+rather than ranks so it applies to any field; fee multiples rather than
+dollars so it is stake-independent. 1.00 = break even before rake; that
+contest takes 15.9%, so an arm needs 1.159.
+
+**The hypothesis it was built to test was MINE and it was WRONG.** The
+reasoning: if the money comes from the whole distribution rather than the
+tail, then arms rejected on `dBest` while positive on `dMean` were killed by
+the wrong yardstick. Three candidates, re-run over 28 slates x 5 seeds:
+
+    variant         dBest    t     dMean     dEV     tEV
+    minspend49cov    +3.7   3.40   +1.9   +0.108   1.73
+    fillopp49        +0.1   0.06   +1.5   +0.011   0.25
+    spstack          +2.0   1.37   +1.1   -0.044  -0.92
+    cover3           +0.8   0.57   +1.2   +0.004   0.07
+
+    absolute ev:  minspend49cov 0.9216   fillopp49 0.8243
+                  cover3 0.8177   control 0.8133   spstack 0.7695
+
+**Nothing came back.** `spstack`, which carried the second-highest dMean ever
+recorded here (+3.1 in its own sweep), is the WORST arm on EV -- below
+control. `fillopp49`, the highest dMean ever recorded (+2.7), reads +0.011.
+
+**WHY dMean DOES NOT BECOME dEV.** The payout curve is a STEP FUNCTION. You
+are paid for crossing thresholds, not for accumulating points. Lifting a
+lineup that finishes 600th of 1,189 to 550th pays exactly zero. fillopp49
+raises the average lineup by letting fills oppose our own SP -- but it raises
+the BOTTOM of the portfolio, which never cashes under any structure.
+
+So "beat the field by more than the rake" does NOT translate to "maximise the
+mean". It translates to "get more lineups across payout thresholds", and even
+on a curve paying 23% of the field those thresholds sit near the TOP of our
+distribution. Which is approximately what `best` and `top10` already measured.
+
+**The 09/10 objective note over-corrected.** The narrow, correct version:
+`best` alone is the wrong metric for a flat deep payout, the fix is `dEV`, and
+dEV happens to rank arms almost exactly as dBest does because both reward the
+top of the portfolio. Do not re-propose a mean-raising arm on EV grounds --
+that is now measured and it does not work.
+
+**What EV scoring IS good for.** It priced the shipped arm for the first time:
+minspend49cov 0.9216 against control 0.8133, a **+13% improvement on the
+money**, larger than expected. And it killed a bad idea inside one sweep
+rather than after a live slate. Keep scoring on it; just do not expect it to
+resurrect the graveyard.
+
+**Still short.** 0.9216 against a 1.159 break-even. The arm closes about a
+third of the gap to profitability and the rest is not there yet.
+
 ## Small contests get the HEAD of the portfolio, not a sample of it
 
 Found 09/08 when the user noticed one arm looked heavy in one contest.

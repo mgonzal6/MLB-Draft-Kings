@@ -214,6 +214,40 @@ def tenth_place(scores):
     return s[9] if len(s) >= 10 else (s[-1] if s else None)
 
 
+# Payout curve, as (cumulative percentile of the field, prize in MULTIPLES
+# of the entry fee). Taken from a real 1,189-entry DK contest measured 09/10:
+# $0.10 entry, 20 max, $100 pool, 277 places paid (top 23.3%), 15.9% rake --
+# 1st $10 = 100x, down to $0.20 = 2x for 118th-277th.
+#
+# Percentiles rather than ranks so the same curve applies to any field size,
+# and fee multiples rather than dollars so EV is stake-independent: an arm
+# scoring ev 1.00 breaks even, 1.159 beats a 15.9% rake.
+#
+# WHY THIS EXISTS. The objective was "a top-10 FINISH" and the harness scored
+# `best`, because without a payout table that was the only honest proxy. With
+# one, measured 09/10: our cash rate lands almost exactly ON the payout line
+# in every structure tested (10.64% vs 10.70%; 23.13% vs 23.30%), we beat the
+# average entry by 4.6%, and the rake is 15.9%. So the real target is beating
+# the FIELD by more than the rake, which rewards moving the whole distribution
+# rather than buying a tail we have failed to buy twelve times. `best` still
+# prints -- it is the right metric for a top-heavy contest -- but it is no
+# longer the only one.
+PAYOUT_PCT = [(0.0841, 100.0), (0.1682, 60.0), (0.2523, 40.0), (0.3364, 30.0),
+              (0.4205, 20.0), (0.5046, 15.0), (0.6728, 10.0), (1.0092, 7.5),
+              (1.8503, 5.0), (4.3734, 4.0), (9.8402, 3.0), (23.2969, 2.0)]
+
+
+def ev_multiple(rank, field):
+    """Prize for one lineup, in multiples of the entry fee."""
+    if not field or rank is None:
+        return 0.0
+    pct = 100.0 * rank / field
+    for cut, mult in PAYOUT_PCT:
+        if pct <= cut:
+            return mult
+    return 0.0
+
+
 def score_portfolio(d, fpts, scores, bar):
     """Score one rebuilt portfolio against what actually happened.
 
@@ -239,9 +273,13 @@ def score_portfolio(d, fpts, scores, bar):
     ranks = [rank_of(x, scores) for x in pts]
     gap = (s.max() - bar) if bar is not None else float("nan")
     top10 = sum(1 for r in ranks if r <= 10)
+    # Expected return per entry, in entry-fee multiples. 1.00 = break even
+    # before rake; the contest this curve came from takes 15.9%.
+    field = len(scores) if scores is not None else 0
+    ev = (sum(ev_multiple(r, field) for r in ranks) / len(ranks)) if ranks else 0.0
     return {"n": len(s), "mean": s.mean(), "sd": s.std(), "best": s.max(),
             "worst": s.min(), "best_rank": min(ranks), "gap": gap,
-            "top10": top10, "missing": missing}
+            "top10": top10, "ev": ev, "missing": missing}
 
 
 def se(x):
@@ -481,10 +519,10 @@ def _paired(df, variants):
     print("PAIRED VS CONTROL  (same slate, same seed)")
     print("=" * 70)
     print(f"{'variant':<12}{'pairs':>6}{'dBest':>8}{'+-':>7}{'t':>7}"
-          f"{'dMean':>8}{'dGap':>8}{'dN':>6}  verdict")
+          f"{'dMean':>8}{'dGap':>8}{'dN':>6}{'dEV':>8}{'tEV':>7}  verdict")
     piv = {k: df.pivot_table(index=["slate", "seed"], columns="variant",
                              values=k)
-           for k in ("mean", "best", "gap", "n")}
+           for k in ("mean", "best", "gap", "n", "ev")}
 
     def delta(k, v):
         """Per-pair (variant - control) for one metric, empty when either arm
@@ -508,6 +546,9 @@ def _paired(df, variants):
         dm = delta("mean", v).mean()
         dg = delta("gap", v).mean()
         dn = delta("n", v).mean()
+        de = delta("ev", v)
+        des = se(de)
+        det = (de.mean() / des) if not pd.isna(des) and des > 0 else float("nan")
         if pd.isna(t):
             verdict = ("need >1 pair" if len(d) < 2
                        else "no spread across pairs")
@@ -516,11 +557,20 @@ def _paired(df, variants):
         else:
             verdict = "better than control" if t > 0 else "worse than control"
         print(f"{v:<12}{len(d):>6}{d.mean():>+8.1f}{fmt(s):>7}{fmt(t, '.2f'):>7}"
-              f"{dm:>+8.1f}{fmt(dg, '+.2f'):>8}{fmt(dn, '+.1f'):>6}  {verdict}")
+              f"{dm:>+8.1f}{fmt(dg, '+.2f'):>8}{fmt(dn, '+.1f'):>6}"
+              f"{fmt(de.mean(), '+.3f'):>8}{fmt(det, '.2f'):>7}  {verdict}")
     print("\nt is dBest/SE. |t| < 2 means this run cannot tell the arm apart\n"
           "from control -- which is a result, not a failure to measure.\n"
           "dN is the portfolio-size difference: a negative dN means the arm\n"
           "underfilled, and its dBest is then partly just having fewer draws.")
+    print("dEV is expected return per entry in ENTRY-FEE MULTIPLES, against a\n"
+          "real 1,189-entry payout curve (see PAYOUT_PCT). An arm at ev 1.00\n"
+          "breaks even before rake; that contest takes 15.9%.\n"
+          "Measured 09/10: our cash rate sits ON the payout line in every\n"
+          "structure tested and we beat the average entry by only 4.6%, so\n"
+          "lifting the WHOLE distribution is worth more than lifting `best`.\n"
+          "Read dEV and dBest together -- they answer different questions,\n"
+          "flat deep payouts versus top-heavy ones.")
 
 
 if __name__ == "__main__":
